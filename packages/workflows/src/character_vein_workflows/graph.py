@@ -215,18 +215,14 @@ def build_stage_two_graph(
         ]
         for search_query in queries:
             try:
-                execution = await toolbox.search_literature(
-                    search_query, limit=10, attempt=attempt
-                )
+                execution = await toolbox.search_literature(search_query, limit=10, attempt=attempt)
             except ToolExecutionError as exc:
                 await emit_tool(exc.call)
                 raise
             calls.append(execution.call.model_dump(mode="json"))
             await emit_tool(execution.call)
             results = [
-                item
-                for item in execution.result
-                if item.evidence.character in (None, character)
+                item for item in execution.result if item.evidence.character in (None, character)
             ]
             for item in results:
                 current = best_results.get(item.evidence.evidence_id)
@@ -294,8 +290,7 @@ def build_stage_two_graph(
             if stage.availability != GlyphAvailability.AVAILABLE:
                 continue
             query = (
-                f"{character} {stage.script_type} {stage.historical_period} "
-                f"代表字形 {spec.theme}"
+                f"{character} {stage.script_type} {stage.historical_period} 代表字形 {spec.theme}"
             )
             try:
                 execution = await toolbox.search_glyphs(
@@ -429,8 +424,7 @@ def build_stage_two_graph(
         ]
         evidence_by_id = {item.evidence_id: item for item in evolution.evidence}
         initial_retrieval = [
-            RetrievedEvidence.model_validate(item)
-            for item in state.get("retrieval_results", [])
+            RetrievedEvidence.model_validate(item) for item in state.get("retrieval_results", [])
         ]
         for claim in evolution.claims:
             topic = claim_topic(claim)
@@ -443,9 +437,7 @@ def build_stage_two_graph(
             )
             queries.append(search_query)
             try:
-                execution = await toolbox.search_literature(
-                    search_query, limit=6, attempt=attempt
-                )
+                execution = await toolbox.search_literature(search_query, limit=6, attempt=attempt)
             except ToolExecutionError as exc:
                 await emit_tool(exc.call)
                 raise
@@ -466,9 +458,7 @@ def build_stage_two_graph(
             ]
             chosen = (preferred or candidates)[:3]
             existing = [
-                evidence_id
-                for evidence_id in claim.evidence_ids
-                if evidence_id in evidence_by_id
+                evidence_id for evidence_id in claim.evidence_ids if evidence_id in evidence_by_id
             ]
             claim.evidence_ids = list(
                 dict.fromkeys([*existing, *(item.evidence.evidence_id for item in chosen)])
@@ -486,16 +476,12 @@ def build_stage_two_graph(
                     purpose=search_query.purpose,
                     candidate_count=len(candidates),
                     selected_count=len(chosen),
-                    structured_matches=sum(
-                        item.structured_rank is not None for item in candidates
-                    ),
+                    structured_matches=sum(item.structured_rank is not None for item in candidates),
                     exact_matches=sum(item.exact_score > 0 for item in candidates),
                     keyword_matches=sum(item.keyword_rank is not None for item in candidates),
                     semantic_matches=sum(item.semantic_rank is not None for item in candidates),
                     channel_candidate_counts={
-                        "structured": sum(
-                            item.structured_rank is not None for item in candidates
-                        ),
+                        "structured": sum(item.structured_rank is not None for item in candidates),
                         "keyword": sum(item.keyword_rank is not None for item in candidates),
                         "semantic": sum(item.semantic_rank is not None for item in candidates),
                     },

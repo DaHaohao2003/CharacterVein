@@ -138,10 +138,14 @@ class TaskService:
         resume: bool = False,
         prestarted: bool = False,
     ) -> TaskRecord:
-        allowed_statuses = {TaskStatus.RUNNING.value} if prestarted else (
-            {TaskStatus.FAILED.value, TaskStatus.RUNNING.value}
-            if resume
-            else {TaskStatus.CONFIRMED.value}
+        allowed_statuses = (
+            {TaskStatus.RUNNING.value}
+            if prestarted
+            else (
+                {TaskStatus.FAILED.value, TaskStatus.RUNNING.value}
+                if resume
+                else {TaskStatus.CONFIRMED.value}
+            )
         )
         if task.status not in allowed_statuses:
             message = "只有失败或中断的任务可以恢复" if resume else "任务必须先确认后才能执行"
@@ -202,9 +206,7 @@ class TaskService:
                     task.search_queries = cast(list[dict[str, Any]], payload["queries"])
                 if step == "tool_call":
                     task.tool_calls = [*(task.tool_calls or []), payload]
-                await self.repository.add_event(
-                    task_id, step, event_status, summary, payload
-                )
+                await self.repository.add_event(task_id, step, event_status, summary, payload)
 
             async with AsyncPostgresSaver.from_conn_string(
                 settings.checkpoint_database_url

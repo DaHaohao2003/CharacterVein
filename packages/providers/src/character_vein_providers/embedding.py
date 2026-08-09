@@ -79,13 +79,8 @@ class AliyunBailianEmbeddingProvider:
                     self.last_request_count += 1
                     response.raise_for_status()
                     payload = response.json()
-                    rows = sorted(
-                        payload["data"], key=lambda item: int(item["index"])
-                    )
-                    batch_vectors = [
-                        [float(value) for value in item["embedding"]]
-                        for item in rows
-                    ]
+                    rows = sorted(payload["data"], key=lambda item: int(item["index"]))
+                    batch_vectors = [[float(value) for value in item["embedding"]] for item in rows]
                     if len(batch_vectors) != len(batch):
                         raise ValueError("embedding response count is invalid")
                     vectors.extend(batch_vectors)

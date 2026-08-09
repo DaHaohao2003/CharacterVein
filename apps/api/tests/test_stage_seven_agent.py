@@ -69,17 +69,13 @@ async def test_hybrid_retrieval_golden_recall_at_ten(
     assert character in SLUGS
     assert expected_id in {item.evidence.evidence_id for item in results}
     assert any(item.rrf_score > 0 for item in results)
-    assert any(
-        item.structured_rank or item.keyword_rank or item.semantic_rank for item in results
-    )
+    assert any(item.structured_rank or item.keyword_rank or item.semantic_rank for item in results)
 
 
 async def test_normal_agent_run_exposes_dynamic_plan_queries_and_tool_trace() -> None:
     events: list[tuple[str, str, str, dict[str, Any]]] = []
 
-    async def sink(
-        step: str, status: str, summary: str, payload: dict[str, Any]
-    ) -> None:
+    async def sink(step: str, status: str, summary: str, payload: dict[str, Any]) -> None:
         events.append((step, status, summary, payload))
 
     graph = build_stage_two_graph(event_sink=sink)
@@ -150,9 +146,7 @@ async def test_conflicting_claim_is_downgraded_without_blocking_safe_content() -
     result = await graph.ainvoke({"task_spec": spec.model_dump(mode="json")})
 
     assert result["audit_report"]["status"] == "approved"
-    assert any(
-        item["status"] == "downgraded" for item in result["audit_report"]["claim_results"]
-    )
+    assert any(item["status"] == "downgraded" for item in result["audit_report"]["claim_results"])
     assert result["constraint_result"]["passed"] is True
     assert result["requires_user_confirmation"] is False
 

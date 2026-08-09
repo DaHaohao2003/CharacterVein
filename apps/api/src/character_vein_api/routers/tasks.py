@@ -109,9 +109,7 @@ async def resume_task(
 
 
 @router.post("/{task_id}/acknowledge-limitations", response_model=TaskResponse)
-async def acknowledge_limitations(
-    task_id: str, session: SessionDependency
-) -> TaskResponse:
+async def acknowledge_limitations(task_id: str, session: SessionDependency) -> TaskResponse:
     repository = TaskRepository(session)
     task = await _require_task(repository, task_id)
     try:

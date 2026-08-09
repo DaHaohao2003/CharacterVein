@@ -19,9 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("evidence_chunks", sa.Column("character", sa.String(length=1), nullable=True))
-    op.add_column(
-        "evidence_chunks", sa.Column("script_type", sa.String(length=32), nullable=True)
-    )
+    op.add_column("evidence_chunks", sa.Column("script_type", sa.String(length=32), nullable=True))
     op.add_column(
         "evidence_chunks",
         sa.Column("historical_period", sa.String(length=96), nullable=True),

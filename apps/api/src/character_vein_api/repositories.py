@@ -278,9 +278,7 @@ class EvidenceRepository:
                 )
             )
         if topic:
-            common_conditions.append(
-                EvidenceChunkRecord.topic.in_([topic, "framework"])
-            )
+            common_conditions.append(EvidenceChunkRecord.topic.in_([topic, "framework"]))
 
         structured_conditions: list[ColumnElement[bool]] = []
         if character:
@@ -332,15 +330,9 @@ class EvidenceRepository:
             )
         ).all()
 
-        structured_ranks = {
-            record.id: rank for rank, (record, _) in enumerate(structured_rows, 1)
-        }
-        keyword_ranks = {
-            record.id: rank for rank, (record, _, _) in enumerate(keyword_rows, 1)
-        }
-        semantic_ranks = {
-            record.id: rank for rank, (record, _, _) in enumerate(semantic_rows, 1)
-        }
+        structured_ranks = {record.id: rank for rank, (record, _) in enumerate(structured_rows, 1)}
+        keyword_ranks = {record.id: rank for rank, (record, _, _) in enumerate(keyword_rows, 1)}
+        semantic_ranks = {record.id: rank for rank, (record, _, _) in enumerate(semantic_rows, 1)}
         keyword_scores = {record.id: float(score) for record, _, score in keyword_rows}
         semantic_scores = {record.id: float(score) for record, _, score in semantic_rows}
         records: dict[str, tuple[EvidenceChunkRecord, SourceRecord]] = {}

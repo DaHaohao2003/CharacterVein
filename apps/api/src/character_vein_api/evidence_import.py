@@ -25,9 +25,7 @@ async def import_evidence_corpus() -> dict[str, int | str | bool]:
         "stored": stored,
         "embedding_provider": type(embedding_provider).__name__,
         "embedding_requests": getattr(embedding_provider, "last_request_count", 0),
-        "embedding_fallback": getattr(
-            embedding_provider, "last_fallback_used", False
-        ),
+        "embedding_fallback": getattr(embedding_provider, "last_fallback_used", False),
     }
 
 

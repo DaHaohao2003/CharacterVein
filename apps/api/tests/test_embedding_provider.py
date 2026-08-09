@@ -51,9 +51,7 @@ async def test_aliyun_embeddings_are_requested_in_bounded_batches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeAsyncClient.batch_lengths = []
-    monkeypatch.setattr(
-        "character_vein_providers.embedding.httpx.AsyncClient", _FakeAsyncClient
-    )
+    monkeypatch.setattr("character_vein_providers.embedding.httpx.AsyncClient", _FakeAsyncClient)
     provider = AliyunBailianEmbeddingProvider(
         api_key="test-key",
         base_url="https://example.test/v1",

@@ -178,8 +178,7 @@ class DeterministicTextProvider:
                 EvidenceSearchQuery(
                     query_id="meaning",
                     query=(
-                        f"{character} 本义 字义 引申 文化语义 "
-                        f"{task_spec.theme} {retry_context}"
+                        f"{character} 本义 字义 引申 文化语义 {task_spec.theme} {retry_context}"
                     ).strip(),
                     purpose="核验本义、字义变化与文化解释边界",
                     character=character,
@@ -188,8 +187,7 @@ class DeterministicTextProvider:
                 EvidenceSearchQuery(
                     query_id="framework",
                     query=(
-                        f"{character} 古今文字 分期 主时间线 草书支线 "
-                        f"规范化 {retry_context}"
+                        f"{character} 古今文字 分期 主时间线 草书支线 规范化 {retry_context}"
                     ).strip(),
                     purpose="核验演化分期、主线和书写支线规则",
                     character=character,

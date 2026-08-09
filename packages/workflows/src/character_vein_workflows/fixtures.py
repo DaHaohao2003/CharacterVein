@@ -19,8 +19,7 @@ JIEZI_ATTRIBUTION = (
     "原始资料版权归原提供方，图像集合致谢 MegaHan97K"
 )
 MOE_EVOLUTION_URL = (
-    "https://www.moe.gov.cn/jyb_xwfb/xw_fbh/moe_2069/s7135/s7562/s7569/"
-    "201308/t20130827_156347.html"
+    "https://www.moe.gov.cn/jyb_xwfb/xw_fbh/moe_2069/s7135/s7562/s7569/201308/t20130827_156347.html"
 )
 MOE_SOURCE_ID = "source-moe-hanzi-evolution"
 
