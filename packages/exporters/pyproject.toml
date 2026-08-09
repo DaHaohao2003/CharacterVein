@@ -1,0 +1,14 @@
+[project]
+name = "character-vein-exporters"
+version = "0.1.0"
+description = "CharacterVein Markdown, HTML, and JSON exporters"
+requires-python = ">=3.12,<3.13"
+dependencies = ["character-vein-domain"]
+
+[tool.uv.sources]
+character-vein-domain = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+

@@ -1,0 +1,14 @@
+[project]
+name = "character-vein-workflows"
+version = "0.1.0"
+description = "CharacterVein LangGraph workflow definitions"
+requires-python = ">=3.12,<3.13"
+dependencies = ["character-vein-domain", "character-vein-providers", "langgraph>=0.6"]
+
+[tool.uv.sources]
+character-vein-domain = { workspace = true }
+character-vein-providers = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

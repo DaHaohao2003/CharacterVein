@@ -1,0 +1,26 @@
+{
+  "name": "character-vein",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.7.1",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @character-vein/web dev",
+    "dev:api": "uv run --project apps/api uvicorn character_vein_api.main:app --reload --port 8000",
+    "build": "pnpm --filter @character-vein/web build",
+    "lint": "pnpm lint:web && pnpm lint:python",
+    "lint:web": "pnpm --filter @character-vein/web lint",
+    "lint:python": "uv run --project apps/api ruff check apps/api packages",
+    "format": "pnpm --filter @character-vein/web format && uv run --project apps/api ruff format apps/api packages",
+    "format:check": "pnpm --filter @character-vein/web format:check && uv run --project apps/api ruff format --check apps/api packages",
+    "typecheck": "pnpm --filter @character-vein/web typecheck && uv run --project apps/api mypy apps/api/src packages/domain/src packages/workflows/src packages/retrieval/src packages/providers/src packages/exporters/src",
+    "test": "uv run --project apps/api pytest apps/api/tests",
+    "compose:up": "docker compose --env-file .env -f infra/compose.yaml up --build -d",
+    "compose:seed": "docker compose --env-file .env -f infra/compose.yaml run --rm glyph-seed",
+    "compose:down": "docker compose --env-file .env -f infra/compose.yaml down",
+    "compose:logs": "docker compose --env-file .env -f infra/compose.yaml logs -f"
+  }
+}

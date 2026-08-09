@@ -1,0 +1,15 @@
+{
+  "dataset": "Ran0/JieZi",
+  "selected_characters": 4,
+  "all_seven_script_characters": 4,
+  "expected_images": 328,
+  "materialized_images": 328,
+  "total_bytes": 1214429,
+  "metadata_errors": [],
+  "missing_count": 0,
+  "pointer_count": 0,
+  "pointer_codepoints": [],
+  "missing_examples": [],
+  "pointer_examples": [],
+  "complete": true
+}

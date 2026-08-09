@@ -1,0 +1,13 @@
+[project]
+name = "character-vein-providers"
+version = "0.1.0"
+description = "Replaceable model and storage provider adapters"
+requires-python = ">=3.12,<3.13"
+dependencies = ["character-vein-domain", "httpx>=0.28", "pydantic>=2.11"]
+
+[tool.uv.sources]
+character-vein-domain = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

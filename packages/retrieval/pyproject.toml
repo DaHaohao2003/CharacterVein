@@ -1,0 +1,18 @@
+[project]
+name = "character-vein-retrieval"
+version = "0.1.0"
+description = "CharacterVein retrieval adapters and ranking"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "character-vein-domain",
+    "character-vein-providers",
+    "sqlalchemy[asyncio]>=2.0",
+]
+
+[tool.uv.sources]
+character-vein-domain = { workspace = true }
+character-vein-providers = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

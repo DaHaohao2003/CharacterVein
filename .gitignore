@@ -1,0 +1,58 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Node.js
+node_modules/
+.next/
+out/
+coverage/
+htmlcov/
+.coverage
+coverage.xml
+*.tsbuildinfo
+playwright-report/
+test-results/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Runtime data
+.data/
+exports/
+tmp/
+uploads/
+backups/
+*.dump
+*.log
+
+# Local competition reference documents
+/*.pdf
+/*.docx

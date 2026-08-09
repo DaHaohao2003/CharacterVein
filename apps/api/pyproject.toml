@@ -1,0 +1,52 @@
+[project]
+name = "character-vein-api"
+version = "0.1.0"
+description = "CharacterVein FastAPI application"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.16",
+    "asyncpg>=0.30",
+    "boto3>=1.39",
+    "fastapi>=0.116",
+    "langgraph>=0.6",
+    "langgraph-checkpoint-postgres>=2.0",
+    "pgvector>=0.4",
+    "pillow>=11.3",
+    "pypdf>=5.9",
+    "python-docx>=1.2",
+    "python-multipart>=0.0.20",
+    "pydantic-settings>=2.10",
+    "psycopg[binary,pool]>=3.3",
+    "sqlalchemy[asyncio]>=2.0",
+    "uvicorn[standard]>=0.35",
+    "character-vein-domain",
+    "character-vein-exporters",
+    "character-vein-providers",
+    "character-vein-retrieval",
+    "character-vein-workflows",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "mypy>=1.17",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.1",
+    "ruff>=0.12",
+]
+
+[tool.uv.sources]
+character-vein-domain = { workspace = true }
+character-vein-exporters = { workspace = true }
+character-vein-providers = { workspace = true }
+character-vein-retrieval = { workspace = true }
+character-vein-workflows = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"

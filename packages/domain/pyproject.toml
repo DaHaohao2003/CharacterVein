@@ -1,0 +1,11 @@
+[project]
+name = "character-vein-domain"
+version = "0.1.0"
+description = "Framework-independent CharacterVein domain models and rules"
+requires-python = ">=3.12,<3.13"
+dependencies = ["pydantic>=2.11"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
