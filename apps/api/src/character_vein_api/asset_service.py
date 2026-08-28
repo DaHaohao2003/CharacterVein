@@ -10,10 +10,11 @@ from PIL import Image
 
 from character_vein_api.config import Settings, get_settings
 from character_vein_api.document_processing import analyze_document_text, extract_document_text
+from character_vein_api.glyph_visual_analysis import build_vision_provider
 from character_vein_api.models import AssetRecord
 from character_vein_api.repositories import AssetRepository
 from character_vein_domain import AssetKind, AssetOrigin, AssetStatus
-from character_vein_providers import AliyunQwenOcrProvider, DeterministicVisionProvider
+from character_vein_providers import VisionModelProvider
 
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 DOCUMENT_TYPES = {
@@ -119,16 +120,8 @@ class AssetService:
             ContentType=mime_type,
         )
 
-    def _vision_provider(self) -> AliyunQwenOcrProvider | DeterministicVisionProvider:
-        provider_name = self.settings.vlm_provider or self.settings.llm_provider
-        api_key = self.settings.llm_api_key.get_secret_value()
-        if provider_name == "aliyun-bailian" and api_key:
-            return AliyunQwenOcrProvider(
-                api_key=api_key,
-                base_url=self.settings.vlm_base_url or self.settings.llm_base_url,
-                model=self.settings.vlm_model,
-            )
-        return DeterministicVisionProvider()
+    def _vision_provider(self) -> VisionModelProvider:
+        return build_vision_provider(self.settings)
 
     @staticmethod
     def _resolve_mime(filename: str, supplied: str) -> str:

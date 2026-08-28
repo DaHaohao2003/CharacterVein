@@ -10,6 +10,167 @@ export type TaskSpec = {
   constraints: string[];
   source_contexts: string[];
   target_needs_confirmation: boolean;
+  web_search_enabled: boolean;
+  communication_brief?: CommunicationBrief | null;
+};
+
+export type CommunicationBrief = {
+  target_characters: string[];
+  communication_goal: string;
+  theme: string;
+  audience: string;
+  channels: Array<"interactive_page" | "social_cards" | "short_video_60s">;
+  tone: string[];
+  duration_seconds: number;
+  deliverables: Array<"interactive_story" | "five_cards" | "video_script">;
+  required_stages: number;
+  interaction_count: number;
+  success_criteria: string[];
+  language: string;
+  constraints: string[];
+  source_contexts: string[];
+  target_needs_confirmation: boolean;
+  web_search_enabled: boolean;
+};
+
+export type NarrativeRoute = {
+  route_id: string;
+  title: string;
+  core_message: string;
+  opening_hook: string;
+  visual_hooks: Array<{
+    image_id: string;
+    script_type: string;
+    role: "opening" | "comparison" | "transition" | "interaction";
+    prompt: string;
+  }>;
+  story_beats: string[];
+  contemporary_connection: string;
+  recommended_channels: CommunicationBrief["channels"];
+  reference_ids: string[];
+};
+
+export type CulturalMotif = {
+  source_route_id: string;
+  title: string;
+  core_message: string;
+  opening_hook: string;
+  visual_sequence: NarrativeRoute["visual_hooks"];
+  story_beats: string[];
+  contemporary_connection: string;
+  audience_promise: string;
+  tone: string[];
+  reference_ids: string[];
+};
+
+export type InteractiveStoryContent = {
+  title: string;
+  lede: string;
+  sections: Array<{
+    section_id: string;
+    title: string;
+    narrative: string;
+    visual_hook_id: string | null;
+    interaction_prompt: string | null;
+  }>;
+  closing: string;
+  interaction_questions: string[];
+};
+
+export type SocialCardsContent = {
+  title: string;
+  cards: Array<{
+    index: number;
+    headline: string;
+    body: string;
+    visual_hook_id: string | null;
+    visual_direction: string;
+  }>;
+  posting_caption: string;
+};
+
+export type ShortVideoScriptContent = {
+  title: string;
+  duration_seconds: 60;
+  opening_hook: string;
+  scenes: Array<{
+    start_second: number;
+    end_second: number;
+    visual: string;
+    narration: string;
+    subtitle: string;
+    visual_hook_id: string | null;
+  }>;
+  closing_cta: string;
+  full_narration: string;
+};
+
+export type CommunicationAsset =
+  | {
+      asset_type: "interactive_story";
+      version: number;
+      content: InteractiveStoryContent;
+      reference_ids: string[];
+      visual_hook_ids: string[];
+      status: "generated" | "needs_revision" | "approved";
+    }
+  | {
+      asset_type: "social_cards";
+      version: number;
+      content: SocialCardsContent;
+      reference_ids: string[];
+      visual_hook_ids: string[];
+      status: "generated" | "needs_revision" | "approved";
+    }
+  | {
+      asset_type: "short_video_script";
+      version: number;
+      content: ShortVideoScriptContent;
+      reference_ids: string[];
+      visual_hook_ids: string[];
+      status: "generated" | "needs_revision" | "approved";
+    };
+
+export type CommunicationAssetVersion = {
+  id: string;
+  task_id: string;
+  asset_type: CommunicationAsset["asset_type"];
+  version: number;
+  content: CommunicationAsset["content"];
+  reference_ids: string[];
+  visual_hook_ids: string[];
+  parent_id: string | null;
+  context_hash: string;
+  status: CommunicationAsset["status"];
+  evaluation: ArtifactEvaluation | null;
+  created_at: string;
+};
+
+export type ArtifactEvaluation = {
+  passed: boolean;
+  checks: Record<string, boolean>;
+  messages: string[];
+  next_action:
+    | "SEARCH_MORE"
+    | "REWRITE_QUERY"
+    | "RESELECT_GLYPH"
+    | "BUILD_NARRATIVES"
+    | "REWRITE_ASSET"
+    | "ASK_USER"
+    | "FINISH";
+  retry_targets: string[];
+};
+
+export type ArtifactEvaluationPackage = {
+  passed: boolean;
+  assets: Partial<
+    Record<
+      "interactive_story" | "social_cards" | "short_video_script",
+      ArtifactEvaluation
+    >
+  >;
+  retry_targets: string[];
+  messages: string[];
 };
 
 export type AssetAnalysis = {
@@ -58,6 +219,8 @@ export type GlyphStage = {
   source_label: string;
   source_path?: string;
   image_attribution?: string;
+  source_url?: string;
+  source_license?: string;
   availability: "available" | "dataset_gap";
   structure_description: string;
   change_from_previous?: string;
@@ -96,6 +259,10 @@ export type Source = {
   url?: string;
   authority_level: string;
   license: string;
+  origin: "web" | "user_upload" | "fixture";
+  task_id?: string;
+  asset_id?: string;
+  retrieved_at?: string;
 };
 
 export type Evidence = {
@@ -110,6 +277,11 @@ export type Evidence = {
   url?: string;
   authority_level: string;
   license: string;
+  origin: "web" | "user_upload" | "fixture";
+  task_id?: string;
+  asset_id?: string;
+  usability: "usable" | "partial" | "metadata_only" | "unusable";
+  retrieved_at?: string;
 };
 
 export type Claim = {
@@ -119,6 +291,12 @@ export type Claim = {
   evidence_ids: string[];
   evidence_grade: string;
   audit_status: string;
+  claim_origin: "evidence_derived" | "hypothesis" | "system_synthesis";
+  evidence_relations: Array<{
+    evidence_id: string;
+    support_type:
+      "supports" | "partially_supports" | "contradicts" | "context_only";
+  }>;
 };
 
 export type EvolutionPackage = {
@@ -131,6 +309,26 @@ export type EvolutionPackage = {
   claims: Claim[];
   evidence: Evidence[];
   controversies: string[];
+  visual_analysis?: {
+    character: string;
+    stage_observations: Array<{
+      image_id: string;
+      script_type: string;
+      visible_features: string[];
+      composition: string;
+      stroke_form: string;
+    }>;
+    comparisons: Array<{
+      from_image_id: string;
+      to_image_id: string;
+      visible_changes: string[];
+      summary: string;
+    }>;
+    overall_summary: string;
+    warnings: string[];
+    model: string;
+    fallback_used: boolean;
+  } | null;
 };
 
 export type AuditReport = {
@@ -184,6 +382,7 @@ export type ToolCall = {
   duration_ms: number;
   attempt: number;
   error?: string;
+  provider: string;
 };
 
 export type GeneratedContent = {
@@ -203,11 +402,59 @@ export type ConstraintResult = {
   messages: string[];
 };
 
+export type ConversationIntent =
+  "answer" | "explore" | "create" | "revise" | "transform" | "clarify";
+
+export type ConversationMessage = {
+  id: string;
+  task_id: string;
+  role: "user" | "assistant";
+  content: string;
+  intent: ConversationIntent | null;
+  state: {
+    action_summary?: string;
+    workspace_view?: "conversation" | "evolution" | "sources" | "artifact";
+    tools_used?: string[];
+    artifact_id?: string | null;
+    web_sources?: Array<{ title: string; url: string; site_name?: string }>;
+    [key: string]: unknown;
+  };
+  created_at: string;
+};
+
+export type CreativeArtifact = {
+  id: string;
+  task_id: string;
+  lineage_id: string;
+  parent_id: string | null;
+  artifact_type: string;
+  format_label: string;
+  title: string;
+  summary: string;
+  content_markdown: string;
+  version: number;
+  reference_ids: string[];
+  visual_hook_ids: string[];
+  status: string;
+  created_at: string;
+};
+
+export type ConversationTurn = {
+  intent: ConversationIntent;
+  action_summary: string;
+  workspace_view: "conversation" | "evolution" | "sources" | "artifact";
+  user_message: ConversationMessage;
+  assistant_message: ConversationMessage;
+  artifact: CreativeArtifact | null;
+  tools_used: string[];
+};
+
 export type Task = {
   id: string;
   status: string;
   raw_input: string;
   spec: TaskSpec;
+  communication_brief: CommunicationBrief;
   plan: Array<{
     id: string;
     title: string;
@@ -221,6 +468,24 @@ export type Task = {
   }> | null;
   search_queries: EvidenceSearchQuery[];
   tool_calls: ToolCall[];
+  agent_runtime: {
+    current_phase?: string;
+    next_action?: string;
+    decision_summary?: string;
+    allowed_actions?: string[];
+    budgets?: Record<string, number>;
+    exploration_history?: Array<Record<string, unknown>>;
+  };
+  narrative_routes: NarrativeRoute[];
+  selected_route_id: string | null;
+  cultural_motif: CulturalMotif | null;
+  communication_assets: Partial<
+    Record<
+      "interactive_story" | "social_cards" | "short_video_script",
+      CommunicationAsset
+    >
+  >;
+  artifact_evaluation: ArtifactEvaluationPackage | null;
   requires_user_confirmation: boolean;
   evolution_package: EvolutionPackage | null;
   generated_content: GeneratedContent | null;

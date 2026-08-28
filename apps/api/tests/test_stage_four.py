@@ -31,7 +31,7 @@ async def test_stage_four_exports_and_constraints_are_structured() -> None:
     spec = TaskSpec(target_characters=["云"], audience="成人", duration_minutes=3)
     content = await DeterministicTextProvider().generate_content(spec, evolution)
     audit = await DeterministicAuditProvider().audit(evolution.claims, evolution.evidence, 1)
-    constraints = evaluate_content_constraints(spec, evolution, content, audit)
+    constraints = evaluate_content_constraints(spec, evolution, content)
 
     html = export_html(content, evolution)
     payload = json.loads(

@@ -12,7 +12,7 @@ from character_vein_domain import (
     RetrievedGlyphImage,
     ToolCall,
 )
-from character_vein_retrieval import EvidenceRetriever, GlyphImageRetriever
+from character_vein_retrieval import EvidenceProvider, EvidenceSearchContext, GlyphImageRetriever
 
 
 @dataclass(frozen=True)
@@ -52,73 +52,100 @@ class ToolExecution[T]:
 class AgentToolbox:
     def __init__(
         self,
-        evidence_retriever: EvidenceRetriever,
+        evidence_providers: list[EvidenceProvider],
         glyph_retriever: GlyphImageRetriever | None,
     ) -> None:
-        self.evidence_retriever = evidence_retriever
+        self.evidence_providers = {provider.name: provider for provider in evidence_providers}
         self.glyph_retriever = glyph_retriever
         self.registry = ToolRegistry()
         for definition in (
             ToolDefinition(
-                "search_literature",
-                "按结构化字段、中文关键词和语义向量检索可信证据并执行 RRF 融合",
-                "EvidenceSearchQuery + limit",
+                "search_evidence",
+                "按来源路由检索任务级证据快照，并保留来源与可用性信息",
+                "provider + EvidenceSearchQuery + EvidenceSearchContext + limit",
                 "RetrievedEvidence[]",
             ),
             ToolDefinition(
                 "search_glyphs",
-                "按汉字和书体从 PostgreSQL/pgvector 检索真实 JieZi 字形",
+                "按汉字和书体从本地字形资料库检索历史字形",
                 "query + character + script_code + limit",
                 "RetrievedGlyphImage[]",
             ),
             ToolDefinition(
-                "get_source_detail",
-                "读取候选证据携带的来源、定位、许可和权威等级",
-                "evidence_id",
-                "Evidence | null",
+                "analyze_glyphs",
+                "使用多模态模型观察已标注字形图片的可见结构并进行阶段对比",
+                "character + labelled glyph images + comparison pairs",
+                "GlyphVisualAnalysis",
             ),
             ToolDefinition(
-                "audit_claims",
-                "检查陈述是否被证据直接支持并给出重试、降级或拒绝动作",
-                "Claim[] + Evidence[]",
-                "AuditReport",
+                "build_cultural_motif",
+                "将已选叙事路线固化为三种传播媒介共享的文化母题",
+                "CommunicationBrief + EvolutionPackage + NarrativeRoute",
+                "CulturalMotif",
+                read_only=False,
+            ),
+            ToolDefinition(
+                "generate_communication_asset",
+                "按统一文化母题生成一类结构化跨媒介传播成品",
+                "asset_type + CommunicationBrief + CulturalMotif + EvolutionPackage",
+                "CommunicationAsset",
+                read_only=False,
+            ),
+            ToolDefinition(
+                "evaluate_communication_asset",
+                "独立检查单类传播成品的母题、视觉素材和媒介结构",
+                "CommunicationBrief + CulturalMotif + CommunicationAsset",
+                "ArtifactEvaluation",
             ),
             ToolDefinition(
                 "generate_content",
-                "使用审校后的事实层生成受众化文化内容",
+                "使用网络检索与用户资料作为上下文生成受众化文化内容",
                 "TaskSpec + EvolutionPackage",
                 "GeneratedContent",
                 read_only=False,
             ),
             ToolDefinition(
                 "check_constraints",
-                "检查阶段、引用、受众、时长和互动题硬约束",
-                "TaskSpec + fact layer + content",
+                "检查阶段、参考上下文、受众、时长和互动题硬约束",
+                "TaskSpec + generation context + content",
                 "ConstraintResult",
             ),
         ):
             self.registry.register(definition)
 
-    async def search_literature(
-        self, search_query: EvidenceSearchQuery, *, limit: int, attempt: int
+    async def search_evidence(
+        self,
+        provider_name: str,
+        search_query: EvidenceSearchQuery,
+        context: EvidenceSearchContext,
+        *,
+        limit: int,
+        attempt: int,
     ) -> ToolExecution[list[RetrievedEvidence]]:
-        return await self.execute(
-            "search_literature",
+        provider = self.evidence_providers[provider_name]
+        provider_message = ""
+
+        async def search() -> list[RetrievedEvidence]:
+            nonlocal provider_message
+            result = await provider.search(search_query, context, limit=limit)
+            provider_message = result.message
+            return result.candidates
+
+        execution = await self.execute(
+            "search_evidence",
             (
-                f"{search_query.query_id}；目标字={search_query.character}；"
+                f"来源={provider.origin.value}；{search_query.query_id}；"
+                f"目标字={search_query.character}；"
                 f"书体={search_query.script_type or '不限'}；主题={search_query.topic or '不限'}"
             ),
-            lambda: self.evidence_retriever.retrieve(
-                search_query.query,
-                limit,
-                character=search_query.character,
-                script_type=search_query.script_type,
-                historical_period=search_query.historical_period,
-                topic=search_query.topic,
-            ),
+            search,
             len,
             attempt=attempt,
+            provider=provider.origin.value,
         )
+        if provider_message:
+            execution.call.result_summary = f"{execution.call.result_summary}；{provider_message}"
+        return execution
 
     async def search_glyphs(
         self,
@@ -158,6 +185,7 @@ class AgentToolbox:
         candidates: list[RetrievedEvidence],
         *,
         attempt: int,
+        provider: str = "internal",
     ) -> ToolExecution[Evidence | None]:
         async def find() -> Evidence | None:
             return next(
@@ -181,6 +209,7 @@ class AgentToolbox:
         result_counter: Callable[[T], int],
         *,
         attempt: int,
+        provider: str = "internal",
     ) -> ToolExecution[T]:
         self.registry.require(tool_name)
         tool_call_id = str(uuid.uuid4())
@@ -199,6 +228,7 @@ class AgentToolbox:
                     duration_ms=duration_ms,
                     attempt=attempt,
                     error=str(exc),
+                    provider=provider,
                 )
             ) from exc
         duration_ms = (time.perf_counter() - started) * 1000
@@ -214,6 +244,7 @@ class AgentToolbox:
                 result_count=result_count,
                 duration_ms=duration_ms,
                 attempt=attempt,
+                provider=provider,
             ),
         )
 

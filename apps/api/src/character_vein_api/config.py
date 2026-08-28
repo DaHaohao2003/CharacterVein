@@ -34,14 +34,15 @@ class Settings(BaseSettings):
     llm_provider: str = "deterministic"
     llm_api_key: SecretStr = SecretStr("")
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    llm_model: str = "qwen-plus"
+    llm_model: str = "qwen3.8-flash"
     llm_audit_enabled: bool = True
     embedding_provider: str = ""
     embedding_model: str = "text-embedding-v4"
     embedding_dimensions: int = 1024
+    web_search_provider: str = "disabled"
     vlm_provider: str = ""
     vlm_base_url: str = ""
-    vlm_model: str = "qwen-vl-ocr"
+    vlm_model: str = "qwen3.8-flash"
     asset_max_image_bytes: int = 10 * 1024 * 1024
     asset_max_document_bytes: int = 20 * 1024 * 1024
 

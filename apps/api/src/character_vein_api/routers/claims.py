@@ -41,6 +41,10 @@ async def get_claim_evidence(
             authority_level=source.authority_level,
             license=source.license,
             support_type=support_type,
+            origin=source.origin,
+            usability=evidence.usability,
+            retrieved_at=evidence.retrieved_at,
+            asset_id=evidence.asset_id,
         )
         for evidence, source, support_type in rows
     ]

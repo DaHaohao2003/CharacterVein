@@ -182,6 +182,8 @@ def _jiezi_stages(character: str, slug: str) -> list[GlyphStage]:
                 ),
                 source_path=source_path,
                 image_attribution=JIEZI_ATTRIBUTION if available else None,
+                source_url=JIEZI_URL if available else None,
+                source_license=JIEZI_LICENSE if available else None,
                 availability=catalog_stage.availability,
                 variant_type="representative" if available else "dataset_gap",
                 structure_description=description,

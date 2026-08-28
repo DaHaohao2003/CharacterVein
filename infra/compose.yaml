@@ -87,6 +87,7 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-aliyun-bailian}
     entrypoint: ["apps/api/evidence-seed-entrypoint.sh"]
     depends_on:
       postgres:
@@ -111,14 +112,15 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-deterministic}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      LLM_MODEL: ${LLM_MODEL:-qwen-plus}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.8-flash}
       LLM_AUDIT_ENABLED: ${LLM_AUDIT_ENABLED:-true}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       VLM_PROVIDER: ${VLM_PROVIDER:-}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-aliyun-bailian}
       VLM_BASE_URL: ${VLM_BASE_URL:-}
-      VLM_MODEL: ${VLM_MODEL:-qwen-vl-ocr}
+      VLM_MODEL: ${VLM_MODEL:-qwen3.8-flash}
     ports:
       - "8000:8000"
     depends_on:

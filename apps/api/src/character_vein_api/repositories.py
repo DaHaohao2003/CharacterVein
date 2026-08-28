@@ -1,5 +1,6 @@
 import hashlib
 import re
+import uuid
 from typing import Any, Literal, cast
 
 from sqlalchemy import Table, and_, delete, func, or_, select
@@ -12,7 +13,10 @@ from character_vein_api.models import (
     AuditRunRecord,
     ClaimEvidenceRecord,
     ClaimRecord,
+    CommunicationAssetRecord,
     ContentVersionRecord,
+    ConversationMessageRecord,
+    CreativeArtifactRecord,
     EvidenceChunkRecord,
     GlyphImageRecord,
     SourceRecord,
@@ -21,10 +25,15 @@ from character_vein_api.models import (
 )
 from character_vein_domain import (
     AuditReport,
+    CommunicationAsset,
+    ConversationIntent,
+    CreativeArtifactDraft,
     Evidence,
+    EvidenceUsability,
     EvolutionPackage,
     RetrievedEvidence,
     Source,
+    SourceOrigin,
     TaskSpec,
     TaskStatus,
 )
@@ -84,6 +93,110 @@ class TaskRepository:
         return list(result)
 
 
+class ConversationRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        *,
+        task_id: str,
+        role: str,
+        content: str,
+        intent: str | None = None,
+        state: dict[str, Any] | None = None,
+    ) -> ConversationMessageRecord:
+        record = ConversationMessageRecord(
+            task_id=task_id,
+            role=role,
+            content=content,
+            intent=intent,
+            state_json=state or {},
+        )
+        self.session.add(record)
+        await self.session.commit()
+        await self.session.refresh(record)
+        return record
+
+    async def list(self, task_id: str, *, limit: int = 100) -> list[ConversationMessageRecord]:
+        result = await self.session.scalars(
+            select(ConversationMessageRecord)
+            .where(ConversationMessageRecord.task_id == task_id)
+            .order_by(ConversationMessageRecord.created_at.desc())
+            .limit(limit)
+        )
+        return list(reversed(list(result)))
+
+
+class CreativeArtifactRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get(self, task_id: str, artifact_id: str) -> CreativeArtifactRecord | None:
+        return cast(
+            CreativeArtifactRecord | None,
+            await self.session.scalar(
+                select(CreativeArtifactRecord).where(
+                    CreativeArtifactRecord.id == artifact_id,
+                    CreativeArtifactRecord.task_id == task_id,
+                )
+            ),
+        )
+
+    async def create(
+        self,
+        *,
+        task_id: str,
+        draft: CreativeArtifactDraft,
+        intent: ConversationIntent,
+        request_message_id: str,
+    ) -> CreativeArtifactRecord:
+        parent = (
+            await self.get(task_id, draft.target_artifact_id)
+            if draft.target_artifact_id is not None
+            else None
+        )
+        record_id = str(uuid.uuid4())
+        if intent == ConversationIntent.REVISE and parent is not None:
+            lineage_id = parent.lineage_id
+        else:
+            lineage_id = record_id
+        latest_version = await self.session.scalar(
+            select(func.max(CreativeArtifactRecord.version)).where(
+                CreativeArtifactRecord.lineage_id == lineage_id
+            )
+        )
+        record = CreativeArtifactRecord(
+            id=record_id,
+            task_id=task_id,
+            lineage_id=lineage_id,
+            parent_id=parent.id if parent is not None else None,
+            request_message_id=request_message_id,
+            artifact_type=draft.artifact_type,
+            format_label=draft.format_label,
+            title=draft.title,
+            summary=draft.summary,
+            content_markdown=draft.content_markdown,
+            version=(latest_version or 0) + 1,
+            reference_ids=draft.reference_ids,
+            visual_hook_ids=draft.visual_hook_ids,
+            status="generated",
+        )
+        self.session.add(record)
+        await self.session.commit()
+        await self.session.refresh(record)
+        return record
+
+    async def list(self, task_id: str, *, limit: int = 100) -> list[CreativeArtifactRecord]:
+        result = await self.session.scalars(
+            select(CreativeArtifactRecord)
+            .where(CreativeArtifactRecord.task_id == task_id)
+            .order_by(CreativeArtifactRecord.created_at.desc())
+            .limit(limit)
+        )
+        return list(result)
+
+
 class AssetRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -116,6 +229,18 @@ class AssetRepository:
         for record in records:
             record.task_id = task_id
         await self.session.commit()
+
+    async def for_task(self, task_id: str, asset_ids: list[str]) -> list[AssetRecord]:
+        if not asset_ids:
+            return []
+        result = await self.session.scalars(
+            select(AssetRecord).where(
+                AssetRecord.task_id == task_id,
+                AssetRecord.id.in_(asset_ids),
+            )
+        )
+        records = {record.id: record for record in result}
+        return [records[asset_id] for asset_id in asset_ids if asset_id in records]
 
 
 class ContentRepository:
@@ -167,6 +292,61 @@ class ContentRepository:
         return await self.session.get(ContentVersionRecord, (task_id, version))
 
 
+class CommunicationAssetRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create_version(
+        self,
+        *,
+        task_id: str,
+        asset: CommunicationAsset,
+        context_hash: str,
+        parent_id: str | None = None,
+        evaluation: dict[str, Any] | None = None,
+    ) -> CommunicationAssetRecord:
+        latest = await self.session.scalar(
+            select(func.max(CommunicationAssetRecord.version)).where(
+                CommunicationAssetRecord.task_id == task_id,
+                CommunicationAssetRecord.asset_type == asset.asset_type.value,
+            )
+        )
+        record = CommunicationAssetRecord(
+            task_id=task_id,
+            asset_type=asset.asset_type.value,
+            version=(latest or 0) + 1,
+            content_json=asset.content.model_dump(mode="json"),
+            reference_ids=asset.reference_ids,
+            visual_hook_ids=asset.visual_hook_ids,
+            parent_id=parent_id,
+            context_hash=context_hash,
+            status=asset.status,
+            evaluation_json=evaluation,
+        )
+        self.session.add(record)
+        await self.session.commit()
+        await self.session.refresh(record)
+        return record
+
+    async def list_versions(self, task_id: str) -> list[CommunicationAssetRecord]:
+        result = await self.session.scalars(
+            select(CommunicationAssetRecord)
+            .where(CommunicationAssetRecord.task_id == task_id)
+            .order_by(
+                CommunicationAssetRecord.asset_type,
+                CommunicationAssetRecord.version.desc(),
+            )
+        )
+        return list(result)
+
+    async def latest_by_type(self, task_id: str) -> dict[str, CommunicationAssetRecord]:
+        versions = await self.list_versions(task_id)
+        latest: dict[str, CommunicationAssetRecord] = {}
+        for record in versions:
+            latest.setdefault(record.asset_type, record)
+        return latest
+
+
 class EvidenceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -191,6 +371,10 @@ class EvidenceRepository:
                 "authority_level": source.authority_level,
                 "license": source.license,
                 "is_available": source.is_available,
+                "origin": source.origin.value,
+                "task_id": source.task_id,
+                "asset_id": source.asset_id,
+                "retrieved_at": source.retrieved_at,
             }
             statement = pg_insert(source_table).values(source_values)
             await self.session.execute(
@@ -229,6 +413,10 @@ class EvidenceRepository:
                 or hashlib.sha256(item.quote_or_summary.encode("utf-8")).hexdigest(),
                 "search_tokens": " ".join(sorted(self._terms(searchable))),
                 "embedding": embedding,
+                "task_id": item.task_id,
+                "asset_id": item.asset_id,
+                "usability": item.usability.value,
+                "retrieved_at": item.retrieved_at,
             }
             statement = pg_insert(evidence_table).values(evidence_values)
             await self.session.execute(
@@ -243,6 +431,19 @@ class EvidenceRepository:
             await self.session.scalar(select(func.count()).select_from(EvidenceChunkRecord)) or 0
         )
 
+    async def has_task_evidence(self, task_id: str, origin: SourceOrigin) -> bool:
+        count = await self.session.scalar(
+            select(func.count())
+            .select_from(EvidenceChunkRecord)
+            .join(SourceRecord, SourceRecord.id == EvidenceChunkRecord.source_id)
+            .where(
+                EvidenceChunkRecord.task_id == task_id,
+                SourceRecord.origin == origin.value,
+                EvidenceChunkRecord.usability != "unusable",
+            )
+        )
+        return bool(count)
+
     async def hybrid_search(
         self,
         query: str,
@@ -253,9 +454,16 @@ class EvidenceRepository:
         script_type: str | None = None,
         historical_period: str | None = None,
         topic: str | None = None,
+        task_id: str | None = None,
+        origins: set[SourceOrigin] | None = None,
     ) -> list[RetrievedEvidence]:
         pool = max(limit * 3, 20)
         common_conditions: list[ColumnElement[bool]] = [SourceRecord.is_available.is_(True)]
+        if task_id is not None:
+            common_conditions.append(EvidenceChunkRecord.task_id == task_id)
+        if origins:
+            common_conditions.append(SourceRecord.origin.in_([origin.value for origin in origins]))
+        common_conditions.append(EvidenceChunkRecord.usability != "unusable")
         if character:
             common_conditions.append(
                 or_(
@@ -296,8 +504,8 @@ class EvidenceRepository:
                 .join(SourceRecord, SourceRecord.id == EvidenceChunkRecord.source_id)
                 .where(*common_conditions, and_(*structured_conditions))
                 .order_by(
-                    SourceRecord.authority_level.asc(),
                     EvidenceChunkRecord.chunk_index.asc(),
+                    EvidenceChunkRecord.id.asc(),
                 )
                 .limit(pool)
             )
@@ -342,7 +550,6 @@ class EvidenceRepository:
             records[record.id] = (record, source)
 
         max_rrf = 3 / 61
-        authority_bonus = {"A": 0.08, "B": 0.05, "C": 0.02, "D": 0.0}
         ranked: list[RetrievedEvidence] = []
         for evidence_id, (record, source) in records.items():
             structured_rank = structured_ranks.get(evidence_id)
@@ -354,10 +561,7 @@ class EvidenceRepository:
                 if rank is not None
             )
             safe_semantic = max(-1.0, min(semantic_scores.get(evidence_id, 0.0), 1.0))
-            final_score = min(
-                1.0,
-                (rrf_score / max_rrf) * 0.92 + authority_bonus.get(source.authority_level, 0.0),
-            )
+            final_score = min(1.0, rrf_score / max_rrf)
             ranked.append(
                 RetrievedEvidence(
                     evidence=self._to_evidence(record, source),
@@ -391,16 +595,17 @@ class EvidenceRepository:
                     evidence_grade=claim.evidence_grade,
                     has_conflict=claim.has_conflict,
                     audit_status=claim.audit_status.value,
+                    claim_origin=claim.claim_origin,
                 )
             )
-            for evidence_id in claim.evidence_ids:
-                if any(item.evidence_id == evidence_id for item in evolution.evidence):
+            for relation in claim.evidence_relations:
+                if any(item.evidence_id == relation.evidence_id for item in evolution.evidence):
                     bindings.append(
                         ClaimEvidenceRecord(
                             task_id=task_id,
                             claim_id=claim.claim_id,
-                            evidence_id=evidence_id,
-                            support_type="supports",
+                            evidence_id=relation.evidence_id,
+                            support_type=relation.support_type.value,
                         )
                     )
         await self.session.flush()
@@ -467,6 +672,11 @@ class EvidenceRepository:
             topic=record.topic,
             chunk_index=record.chunk_index,
             content_hash=record.content_hash,
+            origin=SourceOrigin(source.origin),
+            task_id=record.task_id,
+            asset_id=record.asset_id,
+            usability=EvidenceUsability(record.usability),
+            retrieved_at=record.retrieved_at,
         )
 
     @staticmethod
@@ -514,6 +724,21 @@ class GlyphImageRepository:
 
     async def get(self, image_id: str) -> GlyphImageRecord | None:
         return await self.session.get(GlyphImageRecord, image_id)
+
+    async def get_representative(self, character: str, script_code: str) -> GlyphImageRecord | None:
+        return cast(
+            GlyphImageRecord | None,
+            await self.session.scalar(
+                select(GlyphImageRecord)
+                .where(
+                    GlyphImageRecord.character == character,
+                    GlyphImageRecord.script_code == script_code,
+                    GlyphImageRecord.metadata_json["is_representative"].as_boolean().is_(True),
+                )
+                .order_by(GlyphImageRecord.id)
+                .limit(1)
+            ),
+        )
 
     async def search(
         self,

@@ -1,7 +1,14 @@
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from character_vein_domain import RetrievedEvidence, RetrievedGlyphImage, TaskSpec
+from character_vein_domain import (
+    GlyphStageVisualObservation,
+    GlyphVisualAnalysis,
+    GlyphVisualComparison,
+    RetrievedEvidence,
+    RetrievedGlyphImage,
+    TaskSpec,
+)
 from character_vein_providers import DeterministicTextProvider
 from character_vein_retrieval import InMemoryHybridRetriever
 from character_vein_workflows import build_stage_one_graph, build_stage_two_graph
@@ -102,19 +109,19 @@ class EmptyRetriever:
         return []
 
 
-async def test_stage_two_retries_missing_evidence_once_then_returns_partial() -> None:
+async def test_missing_reference_context_does_not_trigger_claim_audit_retry() -> None:
     retriever = EmptyRetriever()
     graph = build_stage_two_graph(retriever=retriever)
     spec = TaskSpec(target_characters=["云"], required_stages=3, interaction_count=2)
 
     result = await graph.ainvoke({"task_spec": spec.model_dump(mode="json")})
 
-    assert retriever.calls == 42
-    assert {item["attempt"] for item in result["retrieval_summaries"]} == {1, 2}
-    assert result["audit_report"]["status"] == "partial"
-    assert result["requires_user_confirmation"] is True
+    assert retriever.calls == 30
+    assert {item["attempt"] for item in result["retrieval_summaries"]} == {1, 2, 3}
+    assert result["audit_report"]["model"] == "not-run"
+    assert result["requires_user_confirmation"] is False
     assert result["constraint_result"]["passed"] is False
-    assert result["constraint_result"]["checks"]["audit_approved"] is False
+    assert result["constraint_result"]["checks"]["reference_context"] is False
 
 
 class FailOnceRetriever:
@@ -248,7 +255,48 @@ async def test_graph_selects_representative_images_through_glyph_rag() -> None:
     assert len(result["glyph_retrieval_summaries"]) == 7
     assert all(stage["image_id"].endswith("/2") for stage in stages)
     assert all(stage["variant_type"] == "rag_selected_representative" for stage in stages)
-    assert all("图 RAG 召回" in stage["source_label"] for stage in stages)
+    assert all(stage["source_label"].endswith("代表字形") for stage in stages)
+
+
+async def test_multimodal_glyph_observation_enters_evolution_and_content() -> None:
+    async def analyze(character: str, images: list[RetrievedGlyphImage]) -> GlyphVisualAnalysis:
+        return GlyphVisualAnalysis(
+            character=character,
+            stage_observations=[
+                GlyphStageVisualObservation(
+                    image_id=images[0].image_id,
+                    script_type=images[0].script_type,
+                    visible_features=["外部轮廓上部较窄"],
+                    composition="构件呈上下分布",
+                    stroke_form="线条以弧线为主",
+                )
+            ],
+            comparisons=[
+                GlyphVisualComparison(
+                    from_image_id=images[0].image_id,
+                    to_image_id=images[1].image_id,
+                    visible_changes=["下部空间变得紧凑"],
+                    summary="两张图的构件相对位置可见差异。",
+                )
+            ],
+            overall_summary="模型只描述已标注图片中的可见形态。",
+            model="fake-vlm",
+        )
+
+    graph = build_stage_two_graph(
+        glyph_retriever=FakeGlyphRetriever(),
+        glyph_visual_analyzer=analyze,
+    )
+    spec = TaskSpec(target_characters=["云"], required_stages=3, interaction_count=2)
+
+    result = await graph.ainvoke({"task_spec": spec.model_dump(mode="json")})
+
+    visual = result["evolution_package"]["visual_analysis"]
+    assert visual["model"] == "fake-vlm"
+    assert visual["stage_observations"][0]["visible_features"] == ["外部轮廓上部较窄"]
+    assert "多模态字形观察" in result["generated_content"]["body_markdown"]
+    assert "图中可见" in result["generated_content"]["body_markdown"]
+    assert any(call["tool_name"] == "analyze_glyphs" for call in result["tool_calls"])
 
 
 async def test_graph_rejects_static_image_fallback_when_glyph_rag_is_incomplete() -> None:

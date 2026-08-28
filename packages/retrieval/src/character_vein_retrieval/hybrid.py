@@ -2,7 +2,7 @@ import math
 import re
 from typing import Protocol
 
-from character_vein_domain import Evidence, RetrievedEvidence
+from character_vein_domain import Evidence, RetrievedEvidence, SourceOrigin
 from character_vein_providers import DeterministicEmbeddingProvider, EmbeddingProvider
 
 
@@ -16,6 +16,8 @@ class EvidenceRetriever(Protocol):
         script_type: str | None = None,
         historical_period: str | None = None,
         topic: str | None = None,
+        task_id: str | None = None,
+        origins: set[SourceOrigin] | None = None,
     ) -> list[RetrievedEvidence]: ...
 
 
@@ -39,11 +41,15 @@ class InMemoryHybridRetriever:
         script_type: str | None = None,
         historical_period: str | None = None,
         topic: str | None = None,
+        task_id: str | None = None,
+        origins: set[SourceOrigin] | None = None,
     ) -> list[RetrievedEvidence]:
         corpus = [
             item
             for item in self.corpus
             if self._eligible(item, character, script_type, historical_period, topic)
+            and (task_id is None or item.task_id == task_id)
+            and (not origins or item.origin in origins)
         ]
         if not corpus:
             return []
@@ -80,7 +86,6 @@ class InMemoryHybridRetriever:
         by_id = {item[0].evidence_id: item for item in scored}
         fused: list[RetrievedEvidence] = []
         max_rrf = 3 / 61
-        authority_bonus = {"A": 0.08, "B": 0.05, "C": 0.02, "D": 0.0}
         for evidence_id in set(structured_ranks) | set(keyword_ranks) | set(semantic_ranks):
             evidence, keyword_score, semantic_score, _ = by_id[evidence_id]
             structured_rank = structured_ranks.get(evidence_id)
@@ -91,10 +96,7 @@ class InMemoryHybridRetriever:
                 for rank in (structured_rank, keyword_rank, semantic_rank)
                 if rank is not None
             )
-            final_score = min(
-                1.0,
-                (rrf_score / max_rrf) * 0.92 + authority_bonus[evidence.authority_level],
-            )
+            final_score = min(1.0, rrf_score / max_rrf)
             fused.append(
                 RetrievedEvidence(
                     evidence=evidence,

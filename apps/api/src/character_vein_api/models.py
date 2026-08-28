@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -30,6 +31,12 @@ class TaskRecord(Base):
     plan: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     search_queries: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     tool_calls: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    agent_runtime: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    narrative_routes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    selected_route_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cultural_motif: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    communication_assets: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    artifact_evaluation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     requires_user_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
     evolution_package: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     generated_content: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -56,6 +63,49 @@ class WorkflowEventRecord(Base):
     status: Mapped[str] = mapped_column(String(32))
     summary: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConversationMessageRecord(Base):
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    intent: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    state_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CreativeArtifactRecord(Base):
+    __tablename__ = "creative_artifacts"
+    __table_args__ = (
+        UniqueConstraint("lineage_id", "version", name="uq_creative_artifacts_lineage_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    lineage_id: Mapped[str] = mapped_column(String(36), index=True)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("creative_artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    request_message_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("conversation_messages.id", ondelete="SET NULL"), nullable=True
+    )
+    artifact_type: Mapped[str] = mapped_column(String(80), index=True)
+    format_label: Mapped[str] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(String(160))
+    summary: Mapped[str] = mapped_column(Text)
+    content_markdown: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(default=1)
+    reference_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    visual_hook_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(32), default="generated", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -93,6 +143,14 @@ class SourceRecord(Base):
     authority_level: Mapped[str] = mapped_column(String(1))
     license: Mapped[str] = mapped_column(Text)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    origin: Mapped[str] = mapped_column(String(32), default="fixture", index=True)
+    task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -113,6 +171,14 @@ class EvidenceChunkRecord(Base):
     topic: Mapped[str] = mapped_column(String(64), default="general", index=True)
     chunk_index: Mapped[int] = mapped_column(default=0)
     content_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    usability: Mapped[str] = mapped_column(String(32), default="usable", index=True)
+    retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     search_tokens: Mapped[str] = mapped_column(Text, default="")
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -152,6 +218,7 @@ class ClaimRecord(Base):
     evidence_grade: Mapped[str] = mapped_column(String(1))
     has_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
     audit_status: Mapped[str] = mapped_column(String(32), index=True)
+    claim_origin: Mapped[str] = mapped_column(String(32), default="evidence_derived")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -205,4 +272,33 @@ class ContentVersionRecord(Base):
     parent_version: Mapped[int | None] = mapped_column(nullable=True)
     evolution_hash: Mapped[str] = mapped_column(String(64), index=True)
     change_summary: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CommunicationAssetRecord(Base):
+    __tablename__ = "communication_assets"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id",
+            "asset_type",
+            "version",
+            name="uq_communication_assets_task_type_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    asset_type: Mapped[str] = mapped_column(String(32), index=True)
+    version: Mapped[int]
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    reference_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    visual_hook_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("communication_assets.id", ondelete="SET NULL"), nullable=True
+    )
+    context_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="generated", index=True)
+    evaluation_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

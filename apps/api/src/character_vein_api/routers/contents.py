@@ -13,8 +13,22 @@ from character_vein_api.schemas import (
     UpdateContentRequest,
 )
 from character_vein_api.services import ContentService
-from character_vein_domain import AuditReport, EvolutionPackage, GeneratedContent, TaskSpec
-from character_vein_exporters import export_html, export_json, export_markdown
+from character_vein_domain import (
+    AuditReport,
+    CommunicationAsset,
+    CulturalMotif,
+    EvolutionPackage,
+    GeneratedContent,
+    TaskSpec,
+)
+from character_vein_exporters import (
+    export_communication_package_html,
+    export_communication_package_json,
+    export_communication_package_markdown,
+    export_html,
+    export_json,
+    export_markdown,
+)
 
 router = APIRouter(prefix="/tasks", tags=["contents"])
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
@@ -122,6 +136,44 @@ async def export_content(
             content=content,
             evolution=evolution,
             audit=AuditReport.model_validate(task.audit_report),
+        )
+        media_type = "application/json; charset=utf-8"
+        suffix = "json"
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}.{suffix}"'},
+    )
+
+
+@router.post("/{task_id}/communication-package/exports")
+async def export_communication_package(
+    task_id: str, payload: ExportContentRequest, session: SessionDependency
+) -> Response:
+    repository = TaskRepository(session)
+    task = await _require_task(repository, task_id)
+    if task.cultural_motif is None or len(task.communication_assets or {}) != 3:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="传播成品包尚未生成完整")
+    motif = CulturalMotif.model_validate(task.cultural_motif)
+    assets = {
+        key: CommunicationAsset.model_validate(value)
+        for key, value in task.communication_assets.items()
+    }
+    filename = f"character-vein-package-{task.id}"
+    if payload.format == "markdown":
+        body = export_communication_package_markdown(motif, assets)
+        media_type = "text/markdown; charset=utf-8"
+        suffix = "md"
+    elif payload.format == "html":
+        body = export_communication_package_html(motif, assets)
+        media_type = "text/html; charset=utf-8"
+        suffix = "html"
+    else:
+        body = export_communication_package_json(
+            task_id=task.id,
+            motif=motif,
+            assets=assets,
+            evaluation=task.artifact_evaluation,
         )
         media_type = "application/json; charset=utf-8"
         suffix = "json"

@@ -2,9 +2,11 @@ from typing import Any
 
 import pytest
 
-from character_vein_domain import AuditReport, Claim, Evidence, RetrievedEvidence, TaskSpec
-from character_vein_providers import DeterministicAuditProvider
-from character_vein_retrieval import InMemoryHybridRetriever
+from character_vein_domain import (
+    RetrievedEvidence,
+    TaskSpec,
+)
+from character_vein_retrieval import FixtureEvidenceProvider, InMemoryHybridRetriever
 from character_vein_workflows import AgentToolbox, build_stage_two_graph
 from character_vein_workflows.fixtures import all_demo_evidence_corpus
 
@@ -86,20 +88,19 @@ async def test_normal_agent_run_exposes_dynamic_plan_queries_and_tool_trace() ->
     assert result["audit_report"]["status"] == "approved"
     assert result["constraint_result"]["passed"] is True
     assert result["requires_user_confirmation"] is False
-    assert len(result["search_queries"]) >= 21
+    assert len(result["search_queries"]) == 10
     assert {item["status"] for item in result["plan"]} == {"completed"}
     assert all(item["completion_criteria"] for item in result["plan"])
     tool_names = {item["tool_name"] for item in result["tool_calls"]}
     assert {
-        "search_literature",
+        "search_evidence",
         "search_glyphs",
-        "get_source_detail",
-        "audit_claims",
+        "analyze_glyphs",
         "generate_content",
         "check_constraints",
     } <= tool_names
     assert events[0][:2] == ("plan", "running")
-    assert any(step == "claim_support" and status == "completed" for step, status, _, _ in events)
+    assert not any(step in {"claim_support", "audit"} for step, _, _, _ in events)
     assert events[-1][0] == "constraints"
 
 
@@ -113,56 +114,45 @@ class EmptyRetriever:
         return []
 
 
-async def test_insufficient_evidence_is_retried_then_requires_confirmation() -> None:
+async def test_missing_reference_context_is_reported_without_audit_retry() -> None:
     graph = build_stage_two_graph(retriever=EmptyRetriever())
     spec = TaskSpec(target_characters=["明"], required_stages=3, interaction_count=2)
 
     result = await graph.ainvoke({"task_spec": spec.model_dump(mode="json")})
 
-    assert result["retrieval_attempt"] == 2
-    assert result["audit_report"]["status"] == "partial"
-    assert result["requires_user_confirmation"] is True
+    assert result["retrieval_attempt"] == 3
+    assert result["audit_report"]["model"] == "not-run"
+    assert result["requires_user_confirmation"] is False
     assert result["constraint_result"]["passed"] is False
-    assert all(issue["retryable"] is False for issue in result["audit_report"]["issues"])
-    assert all(
-        claim["audit_status"] == "rejected"
-        for claim in result["evolution_package"]["claims"]
-        if claim["claim_type"] != "system_synthesis"
+    assert result["constraint_result"]["checks"]["reference_context"] is False
+    assert result["evolution_package"]["claims"] == []
+
+
+def test_production_graph_has_no_claim_or_audit_nodes() -> None:
+    graph = build_stage_two_graph()
+
+    assert {"bind_claim_evidence", "audit_claims", "prepare_retry"}.isdisjoint(
+        graph.get_graph().nodes
     )
 
 
-class ConflictAuditor:
-    async def audit(
-        self, claims: list[Claim], evidence: list[Evidence], attempt: int
-    ) -> AuditReport:
-        claims[0].has_conflict = True
-        return await DeterministicAuditProvider().audit(claims, evidence, attempt)
-
-
-async def test_conflicting_claim_is_downgraded_without_blocking_safe_content() -> None:
-    graph = build_stage_two_graph(auditor=ConflictAuditor())
-    spec = TaskSpec(target_characters=["雷"], required_stages=3, interaction_count=2)
-
-    result = await graph.ainvoke({"task_spec": spec.model_dump(mode="json")})
-
-    assert result["audit_report"]["status"] == "approved"
-    assert any(item["status"] == "downgraded" for item in result["audit_report"]["claim_results"])
-    assert result["constraint_result"]["passed"] is True
-    assert result["requires_user_confirmation"] is False
-
-
-def test_tool_registry_declares_six_typed_agent_tools() -> None:
-    toolbox = AgentToolbox(InMemoryHybridRetriever(all_demo_evidence_corpus()), None)
+def test_tool_registry_declares_typed_agent_tools() -> None:
+    toolbox = AgentToolbox(
+        [FixtureEvidenceProvider(InMemoryHybridRetriever(all_demo_evidence_corpus()))], None
+    )
 
     definitions = {item.name: item for item in toolbox.registry.list()}
 
     assert set(definitions) == {
-        "search_literature",
+        "search_evidence",
         "search_glyphs",
-        "get_source_detail",
-        "audit_claims",
+        "analyze_glyphs",
+        "build_cultural_motif",
+        "generate_communication_asset",
+        "evaluate_communication_asset",
         "generate_content",
         "check_constraints",
     }
     assert all(item.input_schema and item.output_schema for item in definitions.values())
     assert definitions["generate_content"].read_only is False
+    assert definitions["generate_communication_asset"].read_only is False

@@ -2,19 +2,28 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { AppNavigation, type WorkspaceView } from "@/components/app-navigation";
+import { WorkspaceAgentPanel } from "@/components/workspace-agent-panel";
 import {
   acknowledgeLimitations,
+  createTask,
+  creativeArtifactExportUrl,
   exportUrl,
+  getCreativeArtifacts,
   getEvents,
   getTask,
   resumeTask,
   runTask,
   searchGlyphImages,
+  selectNarrativeRoute,
 } from "@/lib/api";
+import { toPublicCopy, toPublicToolName } from "@/lib/public-copy";
 import type {
+  ConversationTurn,
+  CreativeArtifact,
   GlyphImageSearchResult,
   GlyphStage,
   Task,
@@ -78,14 +87,14 @@ function StageGlyph({
     return (
       <span className={large ? "glyph-gap glyph-gap--large" : "glyph-gap"}>
         <strong>暂无样本</strong>
-        <small>JieZi 数据缺口</small>
+        <small>当前资料暂未收录</small>
       </span>
     );
   }
   const size = large ? 112 : 84;
   return (
     <Image
-      alt={`${stage.character}字${stage.script_type}代表字形${stage.image_id ? `（${stage.image_id}）` : ""}`}
+      alt={`${stage.character}字${stage.script_type}代表字形`}
       height={size}
       src={stage.image_url}
       unoptimized
@@ -105,7 +114,7 @@ function StageButton({
 }) {
   return (
     <button
-      aria-label={`查看${stage.period}${stage.script_type}${stage.availability === "dataset_gap" ? "资料缺口" : `代表字形${stage.image_id ? ` ${stage.image_id}` : ""}`}`}
+      aria-label={`查看${stage.period}${stage.script_type}${stage.availability === "dataset_gap" ? "资料缺口" : "代表字形"}`}
       aria-pressed={active}
       className={active ? "timeline-step is-active" : "timeline-step"}
       onClick={onSelect}
@@ -118,7 +127,6 @@ function StageButton({
         <br />
         {stage.script_type}
       </small>
-      <em className="glyph-id">{stage.image_id ?? "DATASET GAP"}</em>
     </button>
   );
 }
@@ -217,7 +225,7 @@ function GlyphVariantExplorer({
     >
       <div className="variant-heading">
         <div>
-          <p className="eyebrow">JIEZI GLYPH CATALOG</p>
+          <p className="eyebrow">HISTORICAL GLYPH LIBRARY</p>
           <h3 id="variant-gallery-title">{stage.script_type}字形图库</h3>
         </div>
         <span className="variant-count">
@@ -262,7 +270,7 @@ function GlyphVariantExplorer({
             const representative = Boolean(variant.metadata.is_representative);
             return (
               <button
-                aria-label={`查看${stage.script_type}${representative ? "代表字形" : `异体 ${variant.metadata.variant_index ?? ""}`} ${variant.id}`}
+                aria-label={`查看${stage.script_type}${representative ? "代表字形" : "异体样本"}`}
                 aria-pressed={variant.id === selectedVariant?.id}
                 className={
                   variant.id === selectedVariant?.id
@@ -280,7 +288,6 @@ function GlyphVariantExplorer({
                   />
                 </span>
                 <strong>{representative ? "代表字形" : "异体样本"}</strong>
-                <small>{withoutExtension(variant.id).split("/").at(-1)}</small>
               </button>
             );
           })}
@@ -291,7 +298,7 @@ function GlyphVariantExplorer({
         <div className="variant-preview">
           <div className="variant-preview-image">
             <ContainedGlyphImage
-              alt={`${stage.character}字${stage.script_type}放大字形 ${selectedVariant.id}`}
+              alt={`${stage.character}字${stage.script_type}放大字形`}
               sizes="11rem"
               src={selectedVariant.content_url}
             />
@@ -303,19 +310,9 @@ function GlyphVariantExplorer({
                 ? "时间线代表字形"
                 : "同文体异体样本"}
             </h3>
-            <dl className="variant-facts">
-              <dt>图片编号</dt>
-              <dd>{selectedVariant.id}</dd>
-              <dt>原始路径</dt>
-              <dd>{selectedVariant.source_path}</dd>
-              <dt>图库序号</dt>
-              <dd>
-                第{" "}
-                {variants.findIndex((item) => item.id === selectedVariant.id) +
-                  1}{" "}
-                / {variants.length}
-              </dd>
-            </dl>
+            <p className="variant-description">
+              图片仅作为该书体的视觉样本，用于观察轮廓、构件位置和线条形态。
+            </p>
           </div>
         </div>
       )}
@@ -357,7 +354,7 @@ function GlyphVariantExplorer({
                 />
               </span>
               <strong>{stage.script_type}</strong>
-              <small>{selectedVariant.id}</small>
+              <small>当前所选字形</small>
             </article>
             <span className="comparison-mark" aria-hidden="true">
               ⇄
@@ -367,7 +364,7 @@ function GlyphVariantExplorer({
                 {compareStage.availability === "available" &&
                 compareStage.image_url ? (
                   <ContainedGlyphImage
-                    alt={`${compareStage.character}字${compareStage.script_type}代表字形${compareStage.image_id ? `（${compareStage.image_id}）` : ""}`}
+                    alt={`${compareStage.character}字${compareStage.script_type}代表字形`}
                     sizes="10rem"
                     src={compareStage.image_url}
                   />
@@ -376,7 +373,7 @@ function GlyphVariantExplorer({
                 )}
               </span>
               <strong>{compareStage.script_type}</strong>
-              <small>{compareStage.image_id}</small>
+              <small>时间线代表字形</small>
             </article>
           </div>
           <div className="observation-guide">
@@ -397,15 +394,30 @@ function GlyphVariantExplorer({
 
 export default function WorkspacePage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [task, setTask] = useState<Task | null>(null);
   const [events, setEvents] = useState<WorkflowEvent[]>([]);
+  const [artifacts, setArtifacts] = useState<CreativeArtifact[]>([]);
+  const [selectedArtifactId, setSelectedArtifactId] = useState("");
   const [running, setRunning] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [selectingRoute, setSelectingRoute] = useState("");
   const autoRunStarted = useRef(false);
   const [selectedStageId, setSelectedStageId] = useState("");
   const [evolutionView, setEvolutionView] = useState<
     "shape" | "meaning" | "culture"
   >("shape");
+  const requestedView = searchParams.get("view");
+  const [currentView, setCurrentView] = useState<WorkspaceView>(
+    requestedView === "evolution" ||
+      requestedView === "sources" ||
+      requestedView === "output" ||
+      requestedView === "task"
+      ? requestedView
+      : "output",
+  );
+  const bootstrapConversation = searchParams.get("chat") === "1";
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -413,13 +425,18 @@ export default function WorkspacePage() {
     let timer: ReturnType<typeof setInterval> | undefined;
 
     async function refresh() {
-      const [taskResult, eventResult] = await Promise.all([
+      const [taskResult, eventResult, artifactResult] = await Promise.all([
         getTask(id),
         getEvents(id),
+        getCreativeArtifacts(id),
       ]);
       if (cancelled) return;
       setTask(taskResult);
       setEvents(eventResult);
+      setArtifacts(artifactResult);
+      setSelectedArtifactId(
+        (current) => current || artifactResult[0]?.id || "",
+      );
       if (taskResult.status !== "running" && timer) {
         clearInterval(timer);
         timer = undefined;
@@ -483,11 +500,65 @@ export default function WorkspacePage() {
     }
   }
 
+  async function chooseNarrativeRoute(routeId: string) {
+    setSelectingRoute(routeId);
+    setError("");
+    try {
+      let latest = await selectNarrativeRoute(id, routeId);
+      setTask(latest);
+      while (latest.status === "running") {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        const [taskResult, eventResult] = await Promise.all([
+          getTask(id),
+          getEvents(id),
+        ]);
+        latest = taskResult;
+        setTask(taskResult);
+        setEvents(eventResult);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "路线选择失败");
+    } finally {
+      setSelectingRoute("");
+    }
+  }
+
+  async function startNewTask(requirement: string) {
+    if (!task) return;
+    const created = await createTask(
+      requirement,
+      task.input_asset_ids,
+      task.spec.web_search_enabled,
+    );
+    router.push(`/tasks/${created.id}/workspace?chat=1`);
+  }
+
+  async function handleConversationTurn(turn: ConversationTurn) {
+    const [latestTask, latestEvents, latestArtifacts] = await Promise.all([
+      getTask(id),
+      getEvents(id),
+      getCreativeArtifacts(id),
+    ]);
+    setTask(latestTask);
+    setEvents(latestEvents);
+    setArtifacts(latestArtifacts);
+    if (turn.artifact) setSelectedArtifactId(turn.artifact.id);
+    const viewMap: Record<ConversationTurn["workspace_view"], WorkspaceView> = {
+      conversation: "task",
+      evolution: "evolution",
+      sources: "sources",
+      artifact: "output",
+    };
+    setCurrentView(viewMap[turn.workspace_view]);
+  }
+
   if (!task)
     return <main className="loading">{error || "正在载入工作台…"}</main>;
 
   const evolution = task.evolution_package;
   const content = task.generated_content;
+  const selectedArtifact =
+    artifacts.find((item) => item.id === selectedArtifactId) ?? artifacts[0];
   const mainlineStages =
     evolution?.glyph_stages.filter(
       (stage) => stage.lineage_role !== "branch",
@@ -503,447 +574,614 @@ export default function WorkspacePage() {
   const availableMainlineCount = mainlineStages.filter(
     (stage) => stage.availability === "available",
   ).length;
-  const evidenceById = new Map(
-    evolution?.evidence.map((item) => [item.evidence_id, item]) ?? [],
-  );
-  const sourceById = new Map(
-    evolution?.sources.map((item) => [item.source_id, item]) ?? [],
-  );
-  const selectedStageSource = selectedStage
-    ? sourceById.get(selectedStage.source_id)
+  const visualAnalysis = evolution?.visual_analysis;
+  const selectedVisualObservation = selectedStage
+    ? visualAnalysis?.stage_observations.find(
+        (item) =>
+          item.image_id.replace(/\.[^.]+$/, "") === selectedStage.image_id,
+      )
     : undefined;
 
   return (
-    <main className="workspace-shell">
-      <header className="workspace-header">
-        <div>
-          <p className="eyebrow">智能体工作台 · {task.status}</p>
-          <h1>“{task.spec.target_characters.join("")}”字演化任务</h1>
-        </div>
-        {task.status === "confirmed" && (
-          <button disabled={running} onClick={() => execute(false)}>
-            {running ? "执行中…" : "开始执行"}
-          </button>
-        )}
-        {(task.status === "failed" || task.status === "running") && (
-          <button disabled={running} onClick={() => execute(true)}>
-            {running ? "恢复中…" : "从最近检查点恢复"}
-          </button>
-        )}
-        {content && (
-          <Link className="button-link" href={`/tasks/${id}/content`}>
-            编辑传播内容
-          </Link>
-        )}
-        {content && (
-          <a
-            className="button-link button-link--secondary"
-            href={exportUrl(id)}
-          >
-            导出 Markdown
-          </a>
-        )}
-      </header>
-      {error && <p className="error">{error}</p>}
-      {task.error_message && <p className="error">{task.error_message}</p>}
-      {task.requires_user_confirmation && (
-        <section className="confirmation-banner" role="alert">
+    <main className="agent-app-shell workspace-agent-shell">
+      <AppNavigation
+        active="workspace"
+        character={task.spec.target_characters.join("")}
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        status={task.status}
+        taskId={id}
+      />
+
+      <section className="agent-canvas workspace-canvas">
+        <header className="workspace-canvas-header">
           <div>
-            <strong>需要确认资料边界</strong>
+            <p className="eyebrow">CULTURAL COMMUNICATION WORKSPACE</p>
+            <h1>
+              {task.spec.target_characters.length
+                ? `“${task.spec.target_characters.join("")}”字文化创作空间`
+                : "汉字文化创作空间"}
+            </h1>
             <p>
-              两次定向检索后仍有陈述缺少直接证据。系统已隐藏这些陈述，不会把推测写成事实。
+              通过右侧对话提问、研究、生成任意传播内容，并持续修改或转换形式。
             </p>
           </div>
-          <button
-            disabled={acknowledging}
-            onClick={() => void confirmEvidenceBoundary()}
-          >
-            {acknowledging ? "确认中…" : "接受边界并保留降级结果"}
-          </button>
-        </section>
-      )}
+          <div className="workspace-canvas-actions">
+            {selectedArtifact && (
+              <a
+                className="button-link button-link--secondary"
+                href={creativeArtifactExportUrl(id, selectedArtifact.id)}
+              >
+                导出当前作品
+              </a>
+            )}
+            {!selectedArtifact && content && (
+              <Link
+                className="button-link button-link--secondary"
+                href={`/tasks/${id}/content`}
+              >
+                编辑内容
+              </Link>
+            )}
+            {!selectedArtifact && content && (
+              <a
+                className="button-link button-link--secondary"
+                href={exportUrl(id)}
+              >
+                导出
+              </a>
+            )}
+          </div>
+        </header>
 
-      <div className="workspace-grid">
-        <aside className="panel">
-          <h2>任务与执行</h2>
-          <dl className="task-facts">
-            <dt>受众</dt>
-            <dd>{task.spec.audience}</dd>
-            <dt>时长</dt>
-            <dd>{task.spec.duration_minutes} 分钟</dd>
-            <dt>阶段</dt>
-            <dd>
-              主干 {availableMainlineCount} 个可用 · 要求至少{" "}
-              {task.spec.required_stages} 个
-            </dd>
-          </dl>
-          {task.plan && (
-            <>
-              <h3>Agent 计划</h3>
-              <ol className="plan-list">
-                {task.plan.map((step) => (
-                  <li
-                    className={`plan-step plan-step--${step.status}`}
-                    key={step.id}
-                  >
-                    <span>{step.status}</span>
-                    <strong>{step.title}</strong>
-                    <small>{step.agent}</small>
-                    {step.summary && <p>{step.summary}</p>}
-                    {step.tool_names.length > 0 && (
-                      <small>工具：{step.tool_names.join(" · ")}</small>
-                    )}
-                    <details>
-                      <summary>验收与失败动作</summary>
-                      <small>完成标准：{step.completion_criteria}</small>
-                      <small>失败动作：{step.failure_action}</small>
-                      {step.depends_on.length > 0 && (
-                        <small>依赖：{step.depends_on.join(" → ")}</small>
-                      )}
-                    </details>
-                  </li>
-                ))}
-              </ol>
-            </>
-          )}
-          <h3>运行记录</h3>
-          <ol className="event-list">
-            {events
-              .slice(-30)
-              .reverse()
-              .map((event) => (
-                <li key={event.id}>
-                  <span>{event.status}</span>
-                  {event.summary}
-                </li>
-              ))}
-          </ol>
-          {task.tool_calls.length > 0 && (
-            <div className="tool-trace">
-              <h3>工具调用轨迹</h3>
-              {task.tool_calls
-                .slice(-14)
-                .reverse()
-                .map((call) => (
-                  <article key={call.tool_call_id}>
-                    <header>
-                      <code>{call.tool_name}</code>
-                      <span>{call.status}</span>
-                    </header>
-                    <p>{call.input_summary}</p>
-                    <small>
-                      {call.result_summary} · {call.duration_ms.toFixed(0)} ms ·
-                      第 {call.attempt} 次
-                    </small>
-                  </article>
-                ))}
-            </div>
-          )}
-          {task.retrieval_summary && (
-            <div className="retrieval-summary">
-              <h3>检索问题与三路召回</h3>
-              {task.retrieval_summary.map((summary, index) => (
-                <details
-                  key={`${summary.query_id}-${summary.attempt}-${index}`}
-                >
-                  <summary>
-                    {summary.purpose || summary.query_id} · 选出{" "}
-                    {summary.selected_count} 条
-                  </summary>
-                  <small>
-                    结构化 {summary.structured_matches} · 关键词{" "}
-                    {summary.keyword_matches} · 向量 {summary.semantic_matches}{" "}
-                    · 第 {summary.attempt} 次
-                  </small>
-                  <p>{summary.query}</p>
-                </details>
-              ))}
-            </div>
-          )}
-        </aside>
-
-        <section className="panel panel--main">
-          <h2>演化认知</h2>
-          {!evolution && <p className="empty">确认任务后点击“开始执行”。</p>}
-          {evolution && (
-            <>
-              <div className="timeline-wrap">
-                <div className="timeline-heading">
-                  <div>
-                    <p className="eyebrow">HISTORICAL MAINLINE</p>
-                    <h3>历史主时间线</h3>
-                  </div>
-                  <small>秦篆、秦隶是古文字与今文字的重要分界</small>
-                </div>
-                <nav className="timeline" aria-label="汉字历史主时间线">
-                  {mainlineStages.map((stage, index) => (
-                    <div className="timeline-node" key={stage.stage_id}>
-                      <StageButton
-                        active={stage.stage_id === selectedStage?.stage_id}
-                        onSelect={() => setSelectedStageId(stage.stage_id)}
-                        stage={stage}
-                      />
-                      {index < mainlineStages.length - 1 && (
-                        <span className="timeline-arrow" aria-hidden="true">
-                          →
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </nav>
-                <p className="timeline-caption">
-                  甲骨文、金文是资料与书体分类，年代可能重叠；单图没有可靠断代时不作推测。
-                </p>
-              </div>
-              {branchStages.length > 0 && (
-                <section className="branch-lane" aria-labelledby="branch-title">
-                  <div className="branch-connector" aria-hidden="true">
-                    ↳
-                  </div>
-                  <div className="branch-content">
-                    <div className="timeline-heading">
-                      <div>
-                        <p className="eyebrow">WRITING BRANCH</p>
-                        <h3 id="branch-title">草书支线</h3>
-                      </div>
-                      <small>
-                        从隶书快速书写发展，并参与行书形成，不是楷书的下一阶段
-                      </small>
-                    </div>
-                    <div className="branch-stages">
-                      {branchStages.map((stage) => (
-                        <StageButton
-                          active={stage.stage_id === selectedStage?.stage_id}
-                          key={stage.stage_id}
-                          onSelect={() => setSelectedStageId(stage.stage_id)}
-                          stage={stage}
-                        />
-                      ))}
-                    </div>
-                  </div>
+        <div className="workspace-view-stack">
+          {currentView === "task" && (
+            <section className="panel workspace-overview-panel">
+              <h2>任务与执行</h2>
+              <dl className="task-facts">
+                <dt>受众</dt>
+                <dd>{task.spec.audience}</dd>
+                <dt>时长</dt>
+                <dd>{task.spec.duration_minutes} 分钟</dd>
+                <dt>阶段</dt>
+                <dd>
+                  主干 {availableMainlineCount} 个可用 · 要求至少{" "}
+                  {task.spec.required_stages} 个
+                </dd>
+              </dl>
+              {task.agent_runtime.decision_summary && (
+                <section className="agent-decision-card">
+                  <small>当前决策 · {task.agent_runtime.current_phase}</small>
+                  <strong>{task.agent_runtime.next_action}</strong>
+                  <p>{toPublicCopy(task.agent_runtime.decision_summary)}</p>
                 </section>
               )}
-              <div className="view-tabs" role="tablist" aria-label="演化视图">
-                <button
-                  className={evolutionView === "shape" ? "is-active" : ""}
-                  onClick={() => setEvolutionView("shape")}
-                >
-                  字形
-                </button>
-                <button
-                  className={evolutionView === "meaning" ? "is-active" : ""}
-                  onClick={() => setEvolutionView("meaning")}
-                >
-                  字义
-                </button>
-                <button
-                  className={evolutionView === "culture" ? "is-active" : ""}
-                  onClick={() => setEvolutionView("culture")}
-                >
-                  文化
-                </button>
-              </div>
-              {selectedStage && evolutionView === "shape" && (
+              {task.plan && (
                 <>
-                  <article className="stage-focus">
-                    <div className="stage-mark stage-mark--large">
-                      <StageGlyph large stage={selectedStage} />
-                    </div>
-                    <div>
-                      <p className="stage-meta">
-                        {selectedStage.historical_period ??
-                          selectedStage.period}{" "}
-                        · {selectedStage.script_type} ·{" "}
-                        {selectedStage.sample_date ??
-                          selectedStage.approximate_date}
-                      </p>
-                      <span className="variant-badge">
-                        {selectedStage.availability === "dataset_gap"
-                          ? "数据集缺口"
-                          : selectedStage.lineage_role === "branch"
-                            ? "书写支线"
-                            : selectedStage.lineage_role === "transition"
-                              ? "古今文字过渡"
-                              : "历史主干代表字形"}
-                      </span>
-                      {selectedStage.region_or_system && (
-                        <span className="variant-badge variant-badge--secondary">
-                          {selectedStage.region_or_system}
-                        </span>
-                      )}
-                      <h3>{selectedStage.structure_description}</h3>
-                      {selectedStage.change_from_previous && (
-                        <p>{selectedStage.change_from_previous}</p>
-                      )}
-                      <p className="glyph-source">
-                        <small>
-                          来源：{selectedStage.source_label}
-                          {selectedStage.image_attribution && (
-                            <>
-                              <br />
-                              {selectedStage.image_attribution}
-                            </>
-                          )}
-                          {selectedStage.source_path && (
-                            <>
-                              <br />
-                              原始路径：{selectedStage.source_path}
-                            </>
-                          )}
-                        </small>
-                        {selectedStageSource?.url && (
-                          <a
-                            href={selectedStageSource.url}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            查看 JieZi 数据集 ↗
-                          </a>
+                  <h3>Agent 计划</h3>
+                  <ol className="plan-list">
+                    {task.plan.map((step) => (
+                      <li
+                        className={`plan-step plan-step--${step.status}`}
+                        key={step.id}
+                      >
+                        <span>{step.status}</span>
+                        <strong>{step.title}</strong>
+                        <small>{step.agent}</small>
+                        {step.summary && <p>{toPublicCopy(step.summary)}</p>}
+                        {(step.tool_names?.length ?? 0) > 0 && (
+                          <small>
+                            工具：
+                            {step.tool_names.map(toPublicToolName).join(" · ")}
+                          </small>
                         )}
-                      </p>
-                    </div>
-                  </article>
-                  <GlyphVariantExplorer
-                    stage={selectedStage}
-                    stages={evolution.glyph_stages}
-                  />
+                        <details>
+                          <summary>验收与失败动作</summary>
+                          <small>完成标准：{step.completion_criteria}</small>
+                          <small>失败动作：{step.failure_action}</small>
+                          {(step.depends_on?.length ?? 0) > 0 && (
+                            <small>依赖：{step.depends_on.join(" → ")}</small>
+                          )}
+                        </details>
+                      </li>
+                    ))}
+                  </ol>
                 </>
               )}
-              {evolutionView === "meaning" && (
-                <ul className="evolution-notes">
-                  {evolution.meaning_changes.map((item) => (
-                    <li key={item}>{item}</li>
+              <h3>运行记录</h3>
+              <ol className="event-list">
+                {events
+                  .slice(-30)
+                  .reverse()
+                  .map((event) => (
+                    <li key={event.id}>
+                      <span>{event.status}</span>
+                      {toPublicCopy(event.summary)}
+                    </li>
                   ))}
-                </ul>
-              )}
-              {evolutionView === "culture" && (
-                <ul className="evolution-notes">
-                  {evolution.cultural_contexts.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              )}
-              {evolutionView === "shape" && (
-                <ol className="evolution-notes">
-                  {evolution.shape_changes.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ol>
-              )}
-            </>
-          )}
-          {content && (
-            <article className="content-preview">
-              <h2>{content.title}</h2>
-              <pre>{content.body_markdown}</pre>
-              <h3>互动题</h3>
-              <ol>
-                {content.interaction_questions.map((question) => (
-                  <li key={question}>{question}</li>
-                ))}
               </ol>
-            </article>
+              {(task.tool_calls?.length ?? 0) > 0 && (
+                <div className="tool-trace">
+                  <h3>工具调用轨迹</h3>
+                  {(task.tool_calls ?? [])
+                    .slice(-14)
+                    .reverse()
+                    .map((call) => (
+                      <article key={call.tool_call_id}>
+                        <header>
+                          <code>{call.tool_name}</code>
+                          <span>{call.status}</span>
+                        </header>
+                        <p>{toPublicCopy(call.input_summary)}</p>
+                        <small>
+                          {toPublicCopy(call.result_summary)} ·{" "}
+                          {call.duration_ms.toFixed(0)} ms · 第 {call.attempt}{" "}
+                          次
+                        </small>
+                      </article>
+                    ))}
+                </div>
+              )}
+              {task.retrieval_summary && (
+                <div className="retrieval-summary">
+                  <h3>检索问题与三路召回</h3>
+                  {task.retrieval_summary.map((summary, index) => (
+                    <details
+                      key={`${summary.query_id}-${summary.attempt}-${index}`}
+                    >
+                      <summary>
+                        {summary.purpose || summary.query_id} · 选出{" "}
+                        {summary.selected_count} 条
+                      </summary>
+                      <small>
+                        结构化 {summary.structured_matches} · 关键词{" "}
+                        {summary.keyword_matches} · 向量{" "}
+                        {summary.semantic_matches} · 第 {summary.attempt} 次
+                      </small>
+                      <p>{toPublicCopy(summary.query)}</p>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
-        </section>
 
-        <aside className="panel">
-          <h2>证据与审校</h2>
-          {evolution?.claims.map((claim) => (
-            <details className="evidence-card" key={claim.claim_id}>
-              <summary>
-                <span className="grade">{claim.evidence_grade}</span>
-                <span>{claim.content}</span>
-                <small>
-                  {claim.claim_type} · {claim.audit_status}
-                </small>
-              </summary>
-              <div className="evidence-detail">
-                {claim.evidence_ids.length === 0 && (
-                  <p className="empty">系统归纳，没有作为文献事实发布。</p>
-                )}
-                {claim.evidence_ids.map((evidenceId) => {
-                  const evidence = evidenceById.get(evidenceId);
-                  if (!evidence) return null;
-                  return (
-                    <article className="source-card" key={evidenceId}>
+          {currentView === "evolution" && (
+            <section className="panel panel--main workspace-evolution-panel">
+              <h2>演化认知</h2>
+              {!evolution && (
+                <p className="empty">确认任务后点击“开始执行”。</p>
+              )}
+              {evolution && (
+                <>
+                  <div className="timeline-wrap">
+                    <div className="timeline-heading">
+                      <div>
+                        <p className="eyebrow">HISTORICAL MAINLINE</p>
+                        <h3>历史主时间线</h3>
+                      </div>
+                      <small>秦篆、秦隶是古文字与今文字的重要分界</small>
+                    </div>
+                    <nav className="timeline" aria-label="汉字历史主时间线">
+                      {mainlineStages.map((stage, index) => (
+                        <div className="timeline-node" key={stage.stage_id}>
+                          <StageButton
+                            active={stage.stage_id === selectedStage?.stage_id}
+                            onSelect={() => setSelectedStageId(stage.stage_id)}
+                            stage={stage}
+                          />
+                          {index < mainlineStages.length - 1 && (
+                            <span className="timeline-arrow" aria-hidden="true">
+                              →
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </nav>
+                    <p className="timeline-caption">
+                      甲骨文、金文是资料与书体分类，年代可能重叠；单图没有可靠断代时不作推测。
+                    </p>
+                  </div>
+                  {branchStages.length > 0 && (
+                    <section
+                      className="branch-lane"
+                      aria-labelledby="branch-title"
+                    >
+                      <div className="branch-connector" aria-hidden="true">
+                        ↳
+                      </div>
+                      <div className="branch-content">
+                        <div className="timeline-heading">
+                          <div>
+                            <p className="eyebrow">WRITING BRANCH</p>
+                            <h3 id="branch-title">草书支线</h3>
+                          </div>
+                          <small>
+                            从隶书快速书写发展，并参与行书形成，不是楷书的下一阶段
+                          </small>
+                        </div>
+                        <div className="branch-stages">
+                          {branchStages.map((stage) => (
+                            <StageButton
+                              active={
+                                stage.stage_id === selectedStage?.stage_id
+                              }
+                              key={stage.stage_id}
+                              onSelect={() =>
+                                setSelectedStageId(stage.stage_id)
+                              }
+                              stage={stage}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </section>
+                  )}
+                  {visualAnalysis && (
+                    <section
+                      className="visual-analysis"
+                      aria-labelledby="visual-analysis-title"
+                    >
+                      <div className="timeline-heading">
+                        <div>
+                          <p className="eyebrow">MULTIMODAL OBSERVATION</p>
+                          <h3 id="visual-analysis-title">多模态字形观察</h3>
+                        </div>
+                        <small>
+                          {visualAnalysis.model}
+                          {visualAnalysis.fallback_used
+                            ? " · 已降级"
+                            : " · 已读取代表图"}
+                        </small>
+                      </div>
+                      {visualAnalysis.overall_summary && (
+                        <p>{toPublicCopy(visualAnalysis.overall_summary)}</p>
+                      )}
+                      {selectedVisualObservation ? (
+                        <article className="visual-observation-card">
+                          <strong>
+                            {selectedVisualObservation.script_type} ·
+                            当前图片观察
+                          </strong>
+                          {selectedVisualObservation.composition && (
+                            <p>{selectedVisualObservation.composition}</p>
+                          )}
+                          {selectedVisualObservation.stroke_form && (
+                            <p>{selectedVisualObservation.stroke_form}</p>
+                          )}
+                          <ul>
+                            {selectedVisualObservation.visible_features.map(
+                              (feature) => (
+                                <li key={feature}>{feature}</li>
+                              ),
+                            )}
+                          </ul>
+                        </article>
+                      ) : (
+                        <p className="empty">
+                          {visualAnalysis.fallback_used
+                            ? "本次多模态调用未成功，系统没有补写视觉细节。"
+                            : "当前阶段暂无结构化视觉观察。"}
+                        </p>
+                      )}
+                      {visualAnalysis.comparisons.length > 0 && (
+                        <details className="visual-comparisons">
+                          <summary>
+                            查看 {visualAnalysis.comparisons.length}{" "}
+                            组阶段图像对比
+                          </summary>
+                          {visualAnalysis.comparisons.map((comparison) => (
+                            <article
+                              key={`${comparison.from_image_id}-${comparison.to_image_id}`}
+                            >
+                              <strong>
+                                {evolution.glyph_stages.find(
+                                  (stage) =>
+                                    stage.image_id ===
+                                    withoutExtension(comparison.from_image_id),
+                                )?.script_type ?? "前一阶段"}{" "}
+                                →{" "}
+                                {evolution.glyph_stages.find(
+                                  (stage) =>
+                                    stage.image_id ===
+                                    withoutExtension(comparison.to_image_id),
+                                )?.script_type ?? "后一阶段"}
+                              </strong>
+                              <p>{comparison.summary}</p>
+                              <small>
+                                {comparison.visible_changes.join("；")}
+                              </small>
+                            </article>
+                          ))}
+                        </details>
+                      )}
+                      {visualAnalysis.warnings.map((warning) => (
+                        <p className="visual-warning" key={warning}>
+                          {toPublicCopy(warning)}
+                        </p>
+                      ))}
+                      <small>
+                        这里只描述图片可见特征，不根据图像判断年代、出处或直接传承关系。
+                      </small>
+                    </section>
+                  )}
+                  <div
+                    className="view-tabs"
+                    role="tablist"
+                    aria-label="演化视图"
+                  >
+                    <button
+                      className={evolutionView === "shape" ? "is-active" : ""}
+                      onClick={() => setEvolutionView("shape")}
+                    >
+                      字形
+                    </button>
+                    <button
+                      className={evolutionView === "meaning" ? "is-active" : ""}
+                      onClick={() => setEvolutionView("meaning")}
+                    >
+                      字义
+                    </button>
+                    <button
+                      className={evolutionView === "culture" ? "is-active" : ""}
+                      onClick={() => setEvolutionView("culture")}
+                    >
+                      文化
+                    </button>
+                  </div>
+                  {selectedStage && evolutionView === "shape" && (
+                    <>
+                      <article className="stage-focus">
+                        <div className="stage-mark stage-mark--large">
+                          <StageGlyph large stage={selectedStage} />
+                        </div>
+                        <div>
+                          <p className="stage-meta">
+                            {selectedStage.historical_period ??
+                              selectedStage.period}{" "}
+                            · {selectedStage.script_type} ·{" "}
+                            {selectedStage.sample_date ??
+                              selectedStage.approximate_date}
+                          </p>
+                          <span className="variant-badge">
+                            {selectedStage.availability === "dataset_gap"
+                              ? "数据集缺口"
+                              : selectedStage.lineage_role === "branch"
+                                ? "书写支线"
+                                : selectedStage.lineage_role === "transition"
+                                  ? "古今文字过渡"
+                                  : "历史主干代表字形"}
+                          </span>
+                          {selectedStage.region_or_system && (
+                            <span className="variant-badge variant-badge--secondary">
+                              {selectedStage.region_or_system}
+                            </span>
+                          )}
+                          <h3>
+                            {toPublicCopy(selectedStage.structure_description)}
+                          </h3>
+                          {selectedStage.change_from_previous && (
+                            <p>
+                              {toPublicCopy(selectedStage.change_from_previous)}
+                            </p>
+                          )}
+                        </div>
+                      </article>
+                      <GlyphVariantExplorer
+                        stage={selectedStage}
+                        stages={evolution.glyph_stages}
+                      />
+                    </>
+                  )}
+                  {evolutionView === "meaning" && (
+                    <ul className="evolution-notes">
+                      {evolution.meaning_changes.map((item) => (
+                        <li key={item}>{toPublicCopy(item)}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {evolutionView === "culture" && (
+                    <ul className="evolution-notes">
+                      {evolution.cultural_contexts.map((item) => (
+                        <li key={item}>{toPublicCopy(item)}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {evolutionView === "shape" && (
+                    <ol className="evolution-notes">
+                      {evolution.shape_changes.map((item) => (
+                        <li key={item}>{toPublicCopy(item)}</li>
+                      ))}
+                    </ol>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
+          {currentView === "sources" && (
+            <section className="panel workspace-sources-panel">
+              <div className="workspace-section-heading">
+                <div>
+                  <p className="eyebrow">REFERENCE CONTEXT</p>
+                  <h2>本次生成参考</h2>
+                </div>
+                <span>{evolution?.evidence.length ?? 0} 条内容</span>
+              </div>
+              <p className="panel-note">
+                以下网络内容和用户资料会作为大模型的生成上下文，用于减少无依据补写；系统不执行逐句引用或事实核验。
+              </p>
+              <div className="workspace-source-grid">
+                {evolution?.evidence.length ? (
+                  evolution.evidence.map((item) => (
+                    <article className="source-card" key={item.evidence_id}>
                       <p>
-                        <strong>{evidence.title}</strong>
+                        <strong>{item.title}</strong>
                         <span className="source-grade">
-                          {evidence.authority_level} 级
+                          {item.origin === "web"
+                            ? "网络"
+                            : item.origin === "user_upload"
+                              ? "我的资料"
+                              : "开发参考"}
                         </span>
                       </p>
-                      <blockquote>{evidence.quote_or_summary}</blockquote>
+                      <blockquote>{item.quote_or_summary}</blockquote>
                       <small>
-                        {evidence.author_or_org}
-                        {evidence.publication_date
-                          ? ` · ${evidence.publication_date}`
+                        {item.author_or_org}
+                        {item.publication_date
+                          ? ` · ${item.publication_date}`
                           : ""}
                         <br />
-                        定位：{evidence.locator}
-                        <br />
-                        许可：{evidence.license}
+                        位置：{item.locator}
                       </small>
-                      {evidence.url && (
+                      {item.url && (
                         <a
                           className="source-link"
-                          href={evidence.url}
+                          href={item.url}
                           rel="noreferrer"
                           target="_blank"
                         >
-                          查看来源 ↗
+                          查看原内容 ↗
                         </a>
                       )}
                     </article>
-                  );
-                })}
+                  ))
+                ) : (
+                  <p className="empty">当前没有检索到可用参考资料。</p>
+                )}
               </div>
-            </details>
-          ))}
-          {evolution && evolution.controversies.length > 0 && (
-            <section className="controversy-box">
-              <h3>争议与边界</h3>
-              {evolution.controversies.map((item) => (
-                <p key={item}>{item}</p>
-              ))}
-            </section>
-          )}
-          {task.audit_report && (
-            <section
-              className={
-                task.audit_report.status === "approved"
-                  ? "audit-box audit-box--pass"
-                  : "audit-box audit-box--warn"
-              }
-            >
-              <h3>审校结论</h3>
-              <p>{task.audit_report.summary}</p>
-              <small>
-                {task.audit_report.model} · {task.audit_report.prompt_version} ·
-                第{task.audit_report.attempt} 次
-                {task.audit_report.fallback_used ? " · 已启用本地降级" : ""}
-              </small>
-              {task.audit_report.issues.map((issue) => (
-                <p
-                  className="audit-issue"
-                  key={`${issue.issue_code}-${issue.claim_id}`}
+              {task.retrieval_summary && task.retrieval_summary.length > 0 && (
+                <section className="retrieval-overview">
+                  <h3>检索过程摘要</h3>
+                  {task.retrieval_summary.map((summary, index) => (
+                    <article
+                      key={`${summary.query_id}-${summary.attempt}-${index}`}
+                    >
+                      <strong>{summary.purpose || summary.query_id}</strong>
+                      <p>{summary.query}</p>
+                      <small>
+                        候选 {summary.candidate_count} · 最终选用{" "}
+                        {summary.selected_count} · 结构化{" "}
+                        {summary.structured_matches} · 关键词{" "}
+                        {summary.keyword_matches} · 向量{" "}
+                        {summary.semantic_matches}
+                      </small>
+                    </article>
+                  ))}
+                </section>
+              )}
+              {task.constraint_result && (
+                <div
+                  className={
+                    task.constraint_result.passed ? "check-pass" : "check-fail"
+                  }
                 >
-                  {issue.message}
-                </p>
-              ))}
+                  约束检查：
+                  {task.constraint_result.passed ? "全部通过" : "存在未满足项"}
+                </div>
+              )}
             </section>
           )}
-          {task.constraint_result && (
-            <div
-              className={
-                task.constraint_result.passed ? "check-pass" : "check-fail"
-              }
-            >
-              约束检查：
-              {task.constraint_result.passed ? "全部通过" : "存在未满足项"}
-            </div>
+
+          {currentView === "output" && (
+            <section className="panel workspace-output-panel">
+              <div className="workspace-section-heading">
+                <div>
+                  <p className="eyebrow">CREATIVE ARTIFACTS</p>
+                  <h2>创作作品</h2>
+                </div>
+                {!selectedArtifact && content && (
+                  <Link className="button-link" href={`/tasks/${id}/content`}>
+                    打开旧版内容编辑器
+                  </Link>
+                )}
+              </div>
+              {selectedArtifact ? (
+                <div className="creative-artifact-workspace">
+                  <nav
+                    aria-label="本次对话生成的作品"
+                    className="creative-artifact-list"
+                  >
+                    {artifacts.map((artifact) => (
+                      <button
+                        className={
+                          artifact.id === selectedArtifact.id ? "is-active" : ""
+                        }
+                        key={artifact.id}
+                        onClick={() => setSelectedArtifactId(artifact.id)}
+                        type="button"
+                      >
+                        <span>{artifact.format_label}</span>
+                        <strong>{artifact.title}</strong>
+                        <small>版本 {artifact.version}</small>
+                      </button>
+                    ))}
+                  </nav>
+                  <article className="creative-artifact-preview">
+                    <header>
+                      <div>
+                        <span>{selectedArtifact.format_label}</span>
+                        <h2>{toPublicCopy(selectedArtifact.title)}</h2>
+                        <p>{toPublicCopy(selectedArtifact.summary)}</p>
+                      </div>
+                      <small>版本 {selectedArtifact.version}</small>
+                    </header>
+                    <pre>{toPublicCopy(selectedArtifact.content_markdown)}</pre>
+                    <footer>
+                      <span>
+                        继续在右侧告诉智能体要修改的段落或新的传播形式。
+                      </span>
+                      <a
+                        href={creativeArtifactExportUrl(
+                          id,
+                          selectedArtifact.id,
+                        )}
+                      >
+                        导出 Markdown
+                      </a>
+                    </footer>
+                  </article>
+                </div>
+              ) : content ? (
+                <article className="content-preview">
+                  <h2>{content.title}</h2>
+                  <pre>{content.body_markdown}</pre>
+                  <h3>互动题</h3>
+                  <ol>
+                    {content.interaction_questions.map((question) => (
+                      <li key={question}>{question}</li>
+                    ))}
+                  </ol>
+                </article>
+              ) : (
+                <div className="workspace-empty-state">
+                  <span>稿</span>
+                  <h3>这里是动态作品工作区</h3>
+                  <p>
+                    在右侧直接说“写一篇公众号文章”“生成课堂活动”或任何你需要的内容；生成后还可以继续修改和转换形式。
+                  </p>
+                </div>
+              )}
+            </section>
           )}
-        </aside>
-      </div>
+        </div>
+      </section>
+
+      <WorkspaceAgentPanel
+        activeArtifactId={selectedArtifact?.id}
+        acknowledging={acknowledging}
+        error={error}
+        events={events}
+        bootstrapConversation={bootstrapConversation}
+        onAcknowledge={confirmEvidenceBoundary}
+        onConversationTurn={handleConversationTurn}
+        onExecute={execute}
+        onSelectRoute={chooseNarrativeRoute}
+        onStartNewTask={startNewTask}
+        running={running}
+        selectingRoute={selectingRoute}
+        task={task}
+      />
     </main>
   );
 }

@@ -1,6 +1,11 @@
 import type {
   Asset,
   ContentVersion,
+  CommunicationAsset,
+  CommunicationAssetVersion,
+  ConversationMessage,
+  ConversationTurn,
+  CreativeArtifact,
   GeneratedContent,
   GlyphImageSearchResult,
   Task,
@@ -25,10 +30,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function createTask(
   rawInput: string,
   assetIds: string[] = [],
+  webSearchEnabled = true,
 ): Promise<Task> {
   return request<Task>("/tasks", {
     method: "POST",
-    body: JSON.stringify({ raw_input: rawInput, asset_ids: assetIds }),
+    body: JSON.stringify({
+      raw_input: rawInput,
+      asset_ids: assetIds,
+      web_search_enabled: webSearchEnabled,
+    }),
   });
 }
 
@@ -71,6 +81,16 @@ export function resumeTask(taskId: string): Promise<Task> {
   return request<Task>(`/tasks/${taskId}/resume`, { method: "POST" });
 }
 
+export function selectNarrativeRoute(
+  taskId: string,
+  routeId: string,
+): Promise<Task> {
+  return request<Task>(
+    `/tasks/${taskId}/narrative-routes/${encodeURIComponent(routeId)}/select`,
+    { method: "POST" },
+  );
+}
+
 export function acknowledgeLimitations(taskId: string): Promise<Task> {
   return request<Task>(`/tasks/${taskId}/acknowledge-limitations`, {
     method: "POST",
@@ -79,6 +99,41 @@ export function acknowledgeLimitations(taskId: string): Promise<Task> {
 
 export function getEvents(taskId: string): Promise<WorkflowEvent[]> {
   return request<WorkflowEvent[]>(`/tasks/${taskId}/events`);
+}
+
+export function getConversationMessages(
+  taskId: string,
+): Promise<ConversationMessage[]> {
+  return request<ConversationMessage[]>(
+    `/tasks/${taskId}/conversation/messages`,
+  );
+}
+
+export function sendConversationMessage(
+  taskId: string,
+  content: string,
+  activeArtifactId?: string,
+): Promise<ConversationTurn> {
+  return request<ConversationTurn>(`/tasks/${taskId}/conversation/messages`, {
+    method: "POST",
+    body: JSON.stringify({
+      content,
+      active_artifact_id: activeArtifactId || null,
+    }),
+  });
+}
+
+export function getCreativeArtifacts(
+  taskId: string,
+): Promise<CreativeArtifact[]> {
+  return request<CreativeArtifact[]>(`/tasks/${taskId}/creative-artifacts`);
+}
+
+export function creativeArtifactExportUrl(
+  taskId: string,
+  artifactId: string,
+): string {
+  return `/backend/api/v1/tasks/${taskId}/creative-artifacts/${artifactId}/export.md`;
 }
 
 export function searchGlyphImages(options: {
@@ -98,6 +153,21 @@ export function searchGlyphImages(options: {
 
 export function getContentVersions(taskId: string): Promise<ContentVersion[]> {
   return request<ContentVersion[]>(`/tasks/${taskId}/contents`);
+}
+
+export function regenerateCommunicationFragment(
+  taskId: string,
+  assetType: CommunicationAsset["asset_type"],
+  targetIndex: number,
+  instruction: string,
+): Promise<CommunicationAssetVersion> {
+  return request<CommunicationAssetVersion>(
+    `/tasks/${taskId}/communication-assets/${assetType}/fragments/${targetIndex}/regenerate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    },
+  );
 }
 
 export function regenerateContent(
@@ -156,6 +226,31 @@ export async function exportContent(
   const disposition = response.headers.get("content-disposition") ?? "";
   const filename =
     disposition.match(/filename="([^"]+)"/)?.[1] ?? `export.${format}`;
+  return { blob: await response.blob(), filename };
+}
+
+export async function exportCommunicationPackage(
+  taskId: string,
+  format: "markdown" | "html" | "json",
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(
+    `/backend/api/v1/tasks/${taskId}/communication-package/exports`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format }),
+    },
+  );
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string;
+    } | null;
+    throw new Error(payload?.detail ?? `传播包导出失败（${response.status}）`);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename =
+    disposition.match(/filename="([^"]+)"/)?.[1] ??
+    `communication-package.${format}`;
   return { blob: await response.blob(), filename };
 }
 

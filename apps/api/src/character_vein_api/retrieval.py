@@ -1,5 +1,10 @@
 from character_vein_api.repositories import EvidenceRepository, GlyphImageRepository
-from character_vein_domain import GlyphLineageRole, RetrievedEvidence, RetrievedGlyphImage
+from character_vein_domain import (
+    GlyphLineageRole,
+    RetrievedEvidence,
+    RetrievedGlyphImage,
+    SourceOrigin,
+)
 from character_vein_providers import DeterministicEmbeddingProvider, EmbeddingProvider
 
 
@@ -21,6 +26,8 @@ class DatabaseEvidenceRetriever:
         script_type: str | None = None,
         historical_period: str | None = None,
         topic: str | None = None,
+        task_id: str | None = None,
+        origins: set[SourceOrigin] | None = None,
     ) -> list[RetrievedEvidence]:
         query_vector = (await self.embedding_provider.embed([query]))[0]
         return await self.repository.hybrid_search(
@@ -31,6 +38,8 @@ class DatabaseEvidenceRetriever:
             script_type=script_type,
             historical_period=historical_period,
             topic=topic,
+            task_id=task_id,
+            origins=origins,
         )
 
 

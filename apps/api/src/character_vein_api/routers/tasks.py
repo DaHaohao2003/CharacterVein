@@ -5,15 +5,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from character_vein_api.database import async_session_factory, get_session
 from character_vein_api.models import TaskRecord
-from character_vein_api.repositories import TaskRepository
+from character_vein_api.repositories import CommunicationAssetRepository, TaskRepository
 from character_vein_api.schemas import (
+    CommunicationAssetVersionResponse,
     ConfirmTaskRequest,
     CreateTaskRequest,
+    RegenerateCommunicationFragmentRequest,
     TaskResponse,
     WorkflowEventResponse,
 )
-from character_vein_api.services import TaskService
-from character_vein_domain import EvolutionPackage, GeneratedContent
+from character_vein_api.services import CommunicationAssetService, TaskService
+from character_vein_domain import CommunicationAssetType, EvolutionPackage, GeneratedContent
 from character_vein_exporters import export_markdown
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -27,19 +29,28 @@ async def _require_task(repository: TaskRepository, task_id: str) -> TaskRecord:
     return task
 
 
-async def _execute_queued_task(task_id: str, resume: bool) -> None:
+async def _execute_queued_task(task_id: str, resume: bool, route_id: str | None = None) -> None:
     async with async_session_factory() as session:
         repository = TaskRepository(session)
         task = await repository.get(task_id)
         if task is not None:
-            await TaskService(repository).run(task, resume=resume, prestarted=True)
+            await TaskService(repository).run(
+                task,
+                resume=resume,
+                prestarted=True,
+                route_id=route_id,
+            )
 
 
 @router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(payload: CreateTaskRequest, session: SessionDependency) -> TaskResponse:
     service = TaskService(TaskRepository(session))
     try:
-        task = await service.create(payload.raw_input, payload.asset_ids)
+        task = await service.create(
+            payload.raw_input,
+            payload.asset_ids,
+            web_search_enabled=payload.web_search_enabled,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
@@ -108,6 +119,27 @@ async def resume_task(
     return TaskResponse.from_record(task)
 
 
+@router.post(
+    "/{task_id}/narrative-routes/{route_id}/select",
+    response_model=TaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def select_narrative_route(
+    task_id: str,
+    route_id: str,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+) -> TaskResponse:
+    repository = TaskRepository(session)
+    task = await _require_task(repository, task_id)
+    try:
+        task = await TaskService(repository).select_narrative_route(task, route_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    background_tasks.add_task(_execute_queued_task, task.id, True, route_id)
+    return TaskResponse.from_record(task)
+
+
 @router.post("/{task_id}/acknowledge-limitations", response_model=TaskResponse)
 async def acknowledge_limitations(task_id: str, session: SessionDependency) -> TaskResponse:
     repository = TaskRepository(session)
@@ -124,6 +156,46 @@ async def get_events(task_id: str, session: SessionDependency) -> list[WorkflowE
     repository = TaskRepository(session)
     await _require_task(repository, task_id)
     return [WorkflowEventResponse.from_record(item) for item in await repository.events(task_id)]
+
+
+@router.get(
+    "/{task_id}/communication-assets/versions",
+    response_model=list[CommunicationAssetVersionResponse],
+)
+async def get_communication_asset_versions(
+    task_id: str,
+    session: SessionDependency,
+) -> list[CommunicationAssetVersionResponse]:
+    task_repository = TaskRepository(session)
+    await _require_task(task_repository, task_id)
+    records = await CommunicationAssetRepository(session).list_versions(task_id)
+    return [CommunicationAssetVersionResponse.from_record(item) for item in records]
+
+
+@router.post(
+    "/{task_id}/communication-assets/{asset_type}/fragments/{target_index}/regenerate",
+    response_model=CommunicationAssetVersionResponse,
+)
+async def regenerate_communication_fragment(
+    task_id: str,
+    asset_type: str,
+    target_index: int,
+    payload: RegenerateCommunicationFragmentRequest,
+    session: SessionDependency,
+) -> CommunicationAssetVersionResponse:
+    repository = TaskRepository(session)
+    task = await _require_task(repository, task_id)
+    try:
+        parsed_type = CommunicationAssetType(asset_type)
+        record = await CommunicationAssetService(repository).regenerate_fragment(
+            task,
+            asset_type=parsed_type,
+            target_index=target_index,
+            instruction=payload.instruction,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return CommunicationAssetVersionResponse.from_record(record)
 
 
 @router.get("/{task_id}/export.md")

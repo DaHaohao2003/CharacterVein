@@ -1,22 +1,36 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
 from character_vein_api.models import (
     AssetRecord,
     ClaimRecord,
+    CommunicationAssetRecord,
     ContentVersionRecord,
+    ConversationMessageRecord,
+    CreativeArtifactRecord,
     GlyphImageRecord,
     TaskRecord,
     WorkflowEventRecord,
 )
-from character_vein_domain import AssetAnalysis, ConstraintResult, GeneratedContent, TaskSpec
+from character_vein_domain import (
+    AssetAnalysis,
+    CommunicationAsset,
+    CommunicationBrief,
+    ConstraintResult,
+    ConversationIntent,
+    CulturalMotif,
+    GeneratedContent,
+    TaskSpec,
+    communication_brief_from_task_spec,
+)
 
 
 class CreateTaskRequest(BaseModel):
     raw_input: str = Field(min_length=2, max_length=4000)
     asset_ids: list[str] = Field(default_factory=list, max_length=20)
+    web_search_enabled: bool = True
 
 
 class ConfirmTaskRequest(BaseModel):
@@ -40,14 +54,98 @@ class ExportContentRequest(BaseModel):
     format: Literal["markdown", "html", "json"]
 
 
+class RegenerateCommunicationFragmentRequest(BaseModel):
+    instruction: str = Field(min_length=2, max_length=500)
+
+
+class ConversationMessageRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+    active_artifact_id: str | None = Field(default=None, max_length=36)
+
+
+class ConversationMessageResponse(BaseModel):
+    id: str
+    task_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    intent: ConversationIntent | None
+    state: dict[str, Any]
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: ConversationMessageRecord) -> "ConversationMessageResponse":
+        return cls(
+            id=record.id,
+            task_id=record.task_id,
+            role=cast(Literal["user", "assistant"], record.role),
+            content=record.content,
+            intent=ConversationIntent(record.intent) if record.intent else None,
+            state=record.state_json or {},
+            created_at=record.created_at,
+        )
+
+
+class CreativeArtifactResponse(BaseModel):
+    id: str
+    task_id: str
+    lineage_id: str
+    parent_id: str | None
+    artifact_type: str
+    format_label: str
+    title: str
+    summary: str
+    content_markdown: str
+    version: int
+    reference_ids: list[str]
+    visual_hook_ids: list[str]
+    status: str
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: CreativeArtifactRecord) -> "CreativeArtifactResponse":
+        return cls(
+            id=record.id,
+            task_id=record.task_id,
+            lineage_id=record.lineage_id,
+            parent_id=record.parent_id,
+            artifact_type=record.artifact_type,
+            format_label=record.format_label,
+            title=record.title,
+            summary=record.summary,
+            content_markdown=record.content_markdown,
+            version=record.version,
+            reference_ids=record.reference_ids or [],
+            visual_hook_ids=record.visual_hook_ids or [],
+            status=record.status,
+            created_at=record.created_at,
+        )
+
+
+class ConversationTurnResponse(BaseModel):
+    intent: ConversationIntent
+    action_summary: str
+    workspace_view: Literal["conversation", "evolution", "sources", "artifact"]
+    user_message: ConversationMessageResponse
+    assistant_message: ConversationMessageResponse
+    artifact: CreativeArtifactResponse | None
+    tools_used: list[str] = Field(default_factory=list)
+
+
 class TaskResponse(BaseModel):
     id: str
     status: str
     raw_input: str
     spec: TaskSpec
+    communication_brief: CommunicationBrief
     plan: list[dict[str, Any]] | None
     search_queries: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]]
+    agent_runtime: dict[str, Any]
+    narrative_routes: list[dict[str, Any]]
+    selected_route_id: str | None
+    cultural_motif: CulturalMotif | None
+    communication_assets: dict[str, CommunicationAsset]
+    artifact_evaluation: dict[str, Any] | None
     requires_user_confirmation: bool
     evolution_package: dict[str, Any] | None
     generated_content: dict[str, Any] | None
@@ -62,14 +160,31 @@ class TaskResponse(BaseModel):
 
     @classmethod
     def from_record(cls, record: TaskRecord) -> "TaskResponse":
+        spec = TaskSpec.model_validate(record.spec)
         return cls(
             id=record.id,
             status=record.status,
             raw_input=record.raw_input,
-            spec=TaskSpec.model_validate(record.spec),
+            spec=spec,
+            communication_brief=communication_brief_from_task_spec(
+                spec, raw_input=record.raw_input
+            ),
             plan=record.plan,
             search_queries=record.search_queries or [],
             tool_calls=record.tool_calls or [],
+            agent_runtime=record.agent_runtime or {},
+            narrative_routes=record.narrative_routes or [],
+            selected_route_id=record.selected_route_id,
+            cultural_motif=(
+                CulturalMotif.model_validate(record.cultural_motif)
+                if record.cultural_motif is not None
+                else None
+            ),
+            communication_assets={
+                key: CommunicationAsset.model_validate(value)
+                for key, value in (record.communication_assets or {}).items()
+            },
+            artifact_evaluation=record.artifact_evaluation,
             requires_user_confirmation=record.requires_user_confirmation or False,
             evolution_package=record.evolution_package,
             generated_content=record.generated_content,
@@ -108,6 +223,38 @@ class ContentVersionResponse(BaseModel):
             parent_version=record.parent_version,
             evolution_hash=record.evolution_hash,
             change_summary=record.change_summary,
+            created_at=record.created_at,
+        )
+
+
+class CommunicationAssetVersionResponse(BaseModel):
+    id: str
+    task_id: str
+    asset_type: str
+    version: int
+    content: dict[str, Any]
+    reference_ids: list[str]
+    visual_hook_ids: list[str]
+    parent_id: str | None
+    context_hash: str
+    status: str
+    evaluation: dict[str, Any] | None
+    created_at: datetime
+
+    @classmethod
+    def from_record(cls, record: CommunicationAssetRecord) -> "CommunicationAssetVersionResponse":
+        return cls(
+            id=record.id,
+            task_id=record.task_id,
+            asset_type=record.asset_type,
+            version=record.version,
+            content=record.content_json,
+            reference_ids=record.reference_ids or [],
+            visual_hook_ids=record.visual_hook_ids or [],
+            parent_id=record.parent_id,
+            context_hash=record.context_hash,
+            status=record.status,
+            evaluation=record.evaluation_json,
             created_at=record.created_at,
         )
 
@@ -212,6 +359,7 @@ class ClaimResponse(BaseModel):
     evidence_grade: str
     has_conflict: bool
     audit_status: str
+    claim_origin: str
 
     @classmethod
     def from_record(cls, record: ClaimRecord) -> "ClaimResponse":
@@ -223,6 +371,7 @@ class ClaimResponse(BaseModel):
             evidence_grade=record.evidence_grade,
             has_conflict=record.has_conflict,
             audit_status=record.audit_status,
+            claim_origin=record.claim_origin,
         )
 
 
@@ -238,3 +387,7 @@ class ClaimEvidenceResponse(BaseModel):
     authority_level: str
     license: str
     support_type: str
+    origin: str
+    usability: str
+    retrieved_at: datetime | None
+    asset_id: str | None

@@ -10,6 +10,7 @@ from character_vein_api.logging import configure_logging
 from character_vein_api.routers.assets import router as assets_router
 from character_vein_api.routers.claims import router as claims_router
 from character_vein_api.routers.contents import router as contents_router
+from character_vein_api.routers.conversations import router as conversations_router
 from character_vein_api.routers.glyph_images import router as glyph_images_router
 from character_vein_api.routers.glyphs import router as glyphs_router
 from character_vein_api.routers.health import router as health_router
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(health_router, prefix=settings.api_v1_prefix)
 app.include_router(assets_router, prefix=settings.api_v1_prefix)
 app.include_router(tasks_router, prefix=settings.api_v1_prefix)
+app.include_router(conversations_router, prefix=settings.api_v1_prefix)
 app.include_router(claims_router, prefix=settings.api_v1_prefix)
 app.include_router(contents_router, prefix=settings.api_v1_prefix)
 app.include_router(glyphs_router, prefix=settings.api_v1_prefix)

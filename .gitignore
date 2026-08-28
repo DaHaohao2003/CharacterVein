@@ -10,6 +10,7 @@
 
 # Node.js
 node_modules/
+.pnpm-store/
 .next/
 out/
 coverage/
@@ -26,6 +27,7 @@ yarn-error.log*
 
 # Python
 .venv/
+.venv-codex/
 .uv-cache/
 __pycache__/
 *.py[cod]
