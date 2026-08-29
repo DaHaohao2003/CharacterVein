@@ -1,7 +1,6 @@
 # Environment and secrets
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 *.pem
 *.key
@@ -11,6 +10,8 @@
 # Node.js
 node_modules/
 .pnpm-store/
+.turbo/
+.eslintcache
 .next/
 out/
 coverage/
@@ -29,6 +30,7 @@ yarn-error.log*
 .venv/
 .venv-codex/
 .uv-cache/
+.uv-cache-codex/
 .uv-cache-task/
 .uv-python-task/
 __pycache__/
@@ -43,8 +45,13 @@ build/
 # IDE and operating system
 .idea/
 .vscode/
+.agents/
+.codex/
+.claude/
+.cursor/
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.swp
 *.swo
 
@@ -55,7 +62,12 @@ tmp/
 uploads/
 backups/
 *.dump
+*.sqlite
+*.sqlite3
+*.db
 *.log
+*.tmp
+*.bak
 
 # Local competition reference documents
 /*.pdf
