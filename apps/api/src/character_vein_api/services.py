@@ -44,6 +44,7 @@ from character_vein_domain import (
     NarrativeRoute,
     ShortVideoScriptContent,
     SocialCardsContent,
+    SourceOrigin,
     TaskSpec,
     TaskStatus,
     communication_brief_from_task_spec,
@@ -52,6 +53,24 @@ from character_vein_domain import (
 from character_vein_retrieval import EvidenceProvider
 from character_vein_workflows import WorkflowState, build_stage_two_graph
 from character_vein_workflows.fixtures import SUPPORTED_DEMO_CHARACTERS
+
+
+def _generation_evidence(evolution: EvolutionPackage) -> list[Any]:
+    return [
+        item
+        for item in evolution.evidence
+        if (
+            item.origin in {SourceOrigin.WEB, SourceOrigin.USER_UPLOAD}
+            or (
+                item.origin == SourceOrigin.FIXTURE
+                and item.metadata.get("kind") == "evolution_framework"
+            )
+        )
+        and "jiezi"
+        not in " ".join([item.evidence_id, item.source_id, item.title, item.url or ""]).lower()
+        and item.metadata.get("kind")
+        not in {"glyph_dataset", "glyph_stage", "glyph_context"}
+    ]
 
 
 class TaskService:
@@ -529,7 +548,7 @@ class ContentService:
         spec = TaskSpec.model_validate(task.spec)
         content.audience = spec.audience
         content.duration_minutes = spec.duration_minutes
-        valid_sources = {item.evidence_id for item in evolution.evidence}
+        valid_sources = {item.evidence_id for item in _generation_evidence(evolution)}
         content.source_ids = [item for item in content.source_ids if item in valid_sources]
         content.estimated_characters = len(re.sub(r"\s|[#*\-]", "", content.body_markdown))
         constraint = evaluate_content_constraints(spec, evolution, content)
@@ -753,6 +772,7 @@ def evaluate_content_constraints(
     evolution: EvolutionPackage,
     content: GeneratedContent,
 ) -> ConstraintResult:
+    generation_evidence = _generation_evidence(evolution)
     checks = {
         "target_character": evolution.character in spec.target_characters,
         "historical_stages": (
@@ -764,7 +784,8 @@ def evaluate_content_constraints(
             >= spec.required_stages
         ),
         "interaction_count": len(content.interaction_questions) >= spec.interaction_count,
-        "reference_context": bool(evolution.evidence),
+        "reference_context": not generation_evidence
+        or bool(set(content.source_ids) & {item.evidence_id for item in generation_evidence}),
         "visual_context_usage": (
             evolution.visual_analysis is None
             or not evolution.visual_analysis.stage_observations

@@ -231,8 +231,9 @@ async def test_writer_keeps_internal_glyph_metadata_out_of_public_generation_con
     internal = _evidence("jiezi-internal")
     internal.title = "JieZi 元数据"
     internal.metadata["kind"] = "glyph_dataset"
+    fixture = _evidence("unrelated-fixture", origin=SourceOrigin.FIXTURE)
     public = _evidence("web-public")
-    evolution.evidence = [internal, public]
+    evolution.evidence = [internal, fixture, public]
     evolution.visual_analysis = GlyphVisualAnalysis(
         character="礼",
         model="test-vlm",

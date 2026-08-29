@@ -1,8 +1,8 @@
 # 字脉项目设计文档
 
-> 文档版本：v1.1
-> 文档状态：通用对话式文化传播智能体已实施并完成真实模型联调
-> 最后更新：2026-08-28
+> 文档版本：v1.3
+> 文档状态：统一图文文档模型、块级对话编辑与五格式导出已实施
+> 最后更新：2026-08-29
 > 依据文档：[PRD.md](./PRD.md)  
 > 演化分期依据：[EVOLUTION_FRAMEWORK.md](./EVOLUTION_FRAMEWORK.md)  
 > 目标：将 PRD 转换为可实施、可测试、可逐步交付的工程方案
@@ -18,9 +18,11 @@
 | 阶段 4：完整交互与局部再生成 | 已完成               | 三栏工作台、演化视图、不可覆盖内容版本、局部再生成、编辑恢复、HTML/JSON/打印已完成联调           |
 | 阶段 5：扩展案例与发布加固   | 已完成               | 四字 328 图演示集、PostgreSQL/MinIO 图 RAG、检查点恢复、安全/版权检查和四案例验收已完成          |
 | 阶段 6：字形图库与观察对比   | 已完成               | 按汉字和文体浏览全部 JieZi 候选图、区分代表字形与异体样本、支持两阶段并排观察                    |
-| 阶段 7：智能体生成闭环       | 已完成               | 68 条语料仅作 fixture；百炼真实联网搜索与任务级 URL/摘要快照已接入                                |
-| 阶段 8：文化传播智能体重构   | 已完成               | Brief、双探索、路线选择、统一母题、三类成品、独立验收、单资产返工、单片段改写与整包导出已落地       |
-| 阶段 9：通用对话式创作       | 已完成               | 持久对话、自由作品类型、问答/探索/创作/修改/转换路由、作品谱系、三栏联动与真实多模态调用已落地       |
+| 阶段 7：智能体生成闭环       | 已完成               | 68 条语料仅作 fixture；百炼真实联网搜索与任务级 URL/摘要快照已接入                               |
+| 阶段 8：文化传播智能体重构   | 已完成               | Brief、双探索、路线选择、统一母题、三类成品、独立验收、单资产返工、单片段改写与整包导出已落地    |
+| 阶段 9：通用对话式创作       | 已完成               | 持久对话、自由作品类型、问答/探索/创作/修改/转换路由、作品谱系、三栏联动与真实多模态调用已落地   |
+| 阶段 10：传播创作入口        | 已完成               | 五类高频作品入口已落地；视频/动画请求由前后端统一收敛为视频脚本，不生成视频文件                  |
+| 阶段 11：图文作品交付        | 已完成               | 统一图文文档、分页/幻灯片预览、块级对话修改与 Word/HTML/TXT/PDF/PPT 五格式导出已落地             |
 
 ---
 
@@ -33,10 +35,10 @@
 → 读取最近对话与当前作品
 → 规划 answer / explore / create / revise / transform / clarify
 → 按需检索网络、用户资料或已标注字形
-→ 直接回答，或生成任意形式的完整 Markdown 作品
+→ 直接回答，或生成任意形式的完整图文作品
 → 用户继续追问、修改或转换
 → 持久化消息、作品谱系、版本和工具轨迹
-→ 预览与导出
+→ 分页/幻灯片预览与 Word、HTML、TXT、PDF、PPT 导出
 ```
 
 本设计优先保证：
@@ -46,7 +48,10 @@
 3. 作品形式为自由文本，后端和前端不依赖固定三类 Schema；
 4. 最近对话、当前作品、网络、上传材料和字形观察能够按需进入当前轮；
 5. 对话和作品刷新、重启后可恢复，修改与转换关系可追踪；
-6. 用户能看见简明判断、工具动作和参考材料，但系统不展示私有思维过程，也不进行逐句事实核验。
+6. 用户能看见简明判断、工具动作和参考材料，但系统不展示私有思维过程，也不进行逐句事实核验；
+7. 同一份图文文档驱动前端预览与五种导出，用户可点选内容块后通过对话局部修改。
+
+前端用文化文章、讲解与播客稿、图文卡片方案、教育内容和视频脚本五类起点降低需求表达成本；领域层继续使用自由 `artifact_type`，不把快捷入口变成固定枚举。`Conversation Planner` 和生成器共同执行视频边界：用户要求视频、动画或短片时创建“视频脚本”作品，提供分镜、旁白、字幕、时长与素材建议，绝不声称已经渲染、合成或导出视频文件。
 
 当前阶段不建设微服务、不训练模型、不扩充到 200 字，也不开展基线对比或消融实验。原 Brief→路线→母题→三类传播包的 LangGraph 流程作为可选深度模式和历史兼容能力保留，不是普通对话的必经步骤。
 
@@ -111,6 +116,8 @@ flowchart LR
     S --> R[Reference Router]
     S --> Q[Glyph Retrieval + VLM Observation]
     S --> D[(PostgreSQL + pgvector)]
+    S --> C[RichArtifactDocument]
+    C --> X[DOCX / HTML / TXT / PDF / PPTX]
     Q --> O[(MinIO 字形图片)]
     R --> E[百炼 Web Search]
     R --> V[当前任务 Upload Context]
@@ -127,7 +134,7 @@ sequenceDiagram
     participant P as Planner / Generator
     participant T as Web / Upload / Glyph Tools
     participant D as PostgreSQL
-    U->>W: 自然语言消息 + 当前作品选择
+    U->>W: 自然语言消息 + 当前作品/页面/内容块选择
     W->>A: POST conversation/messages
     A->>D: 保存 user message
     A->>P: 最近对话、作品摘要、任务上下文
@@ -146,7 +153,10 @@ sequenceDiagram
 
 - Next.js + React + TypeScript；
 - 采用左侧导航、中间展示、右侧智能体对话的固定三栏结构；
-- 负责持续消息、行动摘要、工具动作、字形/资料/作品联动、作品版本切换和 Markdown 导出；
+- 左侧只保留“首页 / 汉字研究 / 文化传播”三个一级入口；演化、资料、作品与任务进展下沉为工作空间内部视图；
+- 汉字研究与文化传播复用同一任务 ID、消息历史、上传资料、网络上下文和当前作品，切换入口不创建新任务；
+- 负责持续消息、行动摘要、工具动作、字形/资料/作品联动、作品版本切换、块级选择和五格式导出；
+- 文化传播入口展示五类高频作品起点及交付内容，并明确视频只生成脚本；
 - 首页创建任务后直接进入对话工作台，不要求先经过确认页；
 - 旧确认、路线选择、传播包内容页继续作为深度流程兼容入口；
 - 通过 REST 完成命令和查询；`run`/`resume` 返回 `202 Accepted`，工作台约每 900 ms 轮询任务状态和事件；
@@ -286,7 +296,7 @@ api/workflows/retrieval/providers/exporters → domain
 
 ### 5.10 导出模块
 
-职责：输出 Markdown、HTML 和结构化 JSON。PDF 使用浏览器打印完成，首版不在后端实现复杂排版引擎。
+职责：以 `RichArtifactDocument` 为唯一输入输出 Word、独立 HTML、TXT、PDF 和 PPT。DOCX 使用 `python-docx`，PPTX 使用 `python-pptx`，PDF 使用 ReportLab，HTML 内嵌图片，TXT 将图片降级为文字说明。所有视觉格式按原始宽高比使用 contain 排版，不裁切字形。旧 Markdown/JSON 路由仅作兼容。
 
 ### 5.11 持续对话与自由作品模块
 
@@ -295,15 +305,17 @@ api/workflows/retrieval/providers/exporters → domain
 - 保存 `ConversationMessageRecord`，按任务恢复完整 user/assistant 消息；
 - 使用 `ConversationTurnPlan` 将本轮路由为回答、探索、创作、修改、转换或澄清；
 - 仅在计划要求时加载 Web、Upload 或 Glyph/VLM 上下文；
-- 使用 `CreativeArtifactRecord` 保存自由作品类型、Markdown 正文和版本谱系；
+- 使用 `CreativeArtifactRecord` 保存自由作品类型、模型正文、`document_json` 和版本谱系；
 - 修改复用同一 `lineage_id` 并递增 `version`；转换创建新 `lineage_id`，通过 `parent_artifact_id` 指向来源作品；
 - 返回 `workspace_view`、`action_summary` 和公开工具轨迹，驱动三栏工作台联动。
+- 将模型正文规范化为带稳定 `page_id` / `block_id` 的 `RichArtifactDocument`；修改请求携带 `active_page_id` / `active_block_id`，让模型只改用户选中的范围。
 
 约束：
 
 - 面向用户的消息和作品不得出现图片编号、Unicode 代码点、数据集名称、对象存储路径或内部字段名；
 - 图片只用于描述可见轮廓、构件位置、疏密和线条；造字法、字源、年代和传承只能引用明确提供的文本上下文；
 - `active_artifact_id` 优先于“最近作品”，避免在多作品任务中改错对象；
+- 已登记真实字形块强制 `source_kind=glyph`、`locked=true`；修订时保留父版本字形 ID，只允许改排版、图注和周边文案；
 - 模型输出必须通过 Pydantic 结构校验，机器引用 ID 只保留当前上下文允许的值。
 
 ---
@@ -415,22 +427,22 @@ REWRITE_ASSET | ASK_USER | FINISH
 
 ### 7.1 主要数据表
 
-| 表                    | 用途                       | 关键字段                                                                                                                          |
-| --------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `tasks`               | 任务、Brief 与聚合状态     | `id`, `status`, `spec`, `plan`, `tool_calls`, `evolution_package`, `generated_content`；旧 JSON 字段在迁移期继续复用              |
-| `workflow_events`     | 面向用户的节点与动作事件   | `task_id`, `step`, `status`, `summary`, `payload`, `created_at`                                                                   |
-| `assets`              | 用户上传材料               | `id`, `task_id`, `kind`, `storage_key`, `mime_type`, `sha256`, `extracted_text`, `analysis_json`                                  |
-| `sources`             | 来源元数据                 | `id`, `origin`, `task_id`, `asset_id`, `title`, `url`, `retrieved_at`, `license`                                                  |
-| `evidence_chunks`     | 任务级参考片段或 fixture   | 数据库兼容名不变；`id`, `source_id`, `task_id`, `asset_id`, `usability`, `locator`, `content_hash`, `search_tokens`, `embedding` |
-| `glyph_images`        | 四字真实图片目录与检索向量 | `id`, `character`, `script_type`, `lineage_role`, `source_path`, `storage_key`, `sha256`, `embedding`                             |
-| `narrative_routes`    | 候选文化叙事路线           | `id`, `task_id`, `title`, `core_message`, `route_json`, `is_selected`, `created_at`                                                |
-| `communication_assets`| 跨媒介成品与版本           | `id`, `task_id`, `asset_type`, `version`, `content_json`, `parent_id`, `context_hash`, `status`                                   |
-| `claims`              | 旧任务陈述兼容表           | 新任务不写入；字段保留用于读取历史任务                                                                                            |
-| `claim_evidence`      | 旧任务陈述关系兼容表       | 新任务不写入；字段保留用于读取历史任务                                                                                            |
-| `audit_runs`          | 旧任务检查结果兼容表       | 新任务只写入 `not-run` 兼容结果，不执行检查                                                                                       |
-| `content_versions`    | 旧版单一内容版本兼容表     | 新传播成品迁移完成前双写；迁移完成后只读                                                                                          |
-| `conversation_messages` | 持久对话消息             | `id`, `task_id`, `role`, `content`, `intent`, `action_summary`, `tool_trace`, `created_at`                                         |
-| `creative_artifacts`    | 自由作品与版本谱系       | `id`, `task_id`, `lineage_id`, `version`, `parent_artifact_id`, `artifact_type`, `format_label`, `title`, `summary`, `content_markdown` |
+| 表                      | 用途                       | 关键字段                                                                                                                                                 |
+| ----------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tasks`                 | 任务、Brief 与聚合状态     | `id`, `status`, `spec`, `plan`, `tool_calls`, `evolution_package`, `generated_content`；旧 JSON 字段在迁移期继续复用                                     |
+| `workflow_events`       | 面向用户的节点与动作事件   | `task_id`, `step`, `status`, `summary`, `payload`, `created_at`                                                                                          |
+| `assets`                | 用户上传材料               | `id`, `task_id`, `kind`, `storage_key`, `mime_type`, `sha256`, `extracted_text`, `analysis_json`                                                         |
+| `sources`               | 来源元数据                 | `id`, `origin`, `task_id`, `asset_id`, `title`, `url`, `retrieved_at`, `license`                                                                         |
+| `evidence_chunks`       | 任务级参考片段或 fixture   | 数据库兼容名不变；`id`, `source_id`, `task_id`, `asset_id`, `usability`, `locator`, `content_hash`, `search_tokens`, `embedding`                         |
+| `glyph_images`          | 四字真实图片目录与检索向量 | `id`, `character`, `script_type`, `lineage_role`, `source_path`, `storage_key`, `sha256`, `embedding`                                                    |
+| `narrative_routes`      | 候选文化叙事路线           | `id`, `task_id`, `title`, `core_message`, `route_json`, `is_selected`, `created_at`                                                                      |
+| `communication_assets`  | 跨媒介成品与版本           | `id`, `task_id`, `asset_type`, `version`, `content_json`, `parent_id`, `context_hash`, `status`                                                          |
+| `claims`                | 旧任务陈述兼容表           | 新任务不写入；字段保留用于读取历史任务                                                                                                                   |
+| `claim_evidence`        | 旧任务陈述关系兼容表       | 新任务不写入；字段保留用于读取历史任务                                                                                                                   |
+| `audit_runs`            | 旧任务检查结果兼容表       | 新任务只写入 `not-run` 兼容结果，不执行检查                                                                                                              |
+| `content_versions`      | 旧版单一内容版本兼容表     | 新传播成品迁移完成前双写；迁移完成后只读                                                                                                                 |
+| `conversation_messages` | 持久对话消息               | `id`, `task_id`, `role`, `content`, `intent`, `action_summary`, `tool_trace`, `created_at`                                                               |
+| `creative_artifacts`    | 自由图文作品与版本谱系     | `id`, `task_id`, `lineage_id`, `version`, `parent_artifact_id`, `artifact_type`, `format_label`, `title`, `summary`, `content_markdown`, `document_json` |
 
 LangGraph PostgreSQL Checkpointer 使用其自有检查点表，不与上述业务表重复建模。
 
@@ -473,13 +485,14 @@ LangGraph PostgreSQL Checkpointer 使用其自有检查点表，不与上述业�
 
 ### 8.1.1 对话与自由作品
 
-| 方法   | 路径                                                        | 作用                                      |
-| ------ | ----------------------------------------------------------- | ----------------------------------------- |
-| `GET`  | `/tasks/{task_id}/conversation/messages`                    | 获取当前任务的持久对话                    |
-| `POST` | `/tasks/{task_id}/conversation/messages`                    | 发送消息，可携带当前选中作品 ID           |
-| `GET`  | `/tasks/{task_id}/creative-artifacts`                       | 获取作品及所有不可覆盖版本                |
-| `GET`  | `/tasks/{task_id}/creative-artifacts/{artifact_id}`         | 获取单个作品版本                          |
-| `GET`  | `/tasks/{task_id}/creative-artifacts/{artifact_id}/export.md` | 导出该版本 Markdown                     |
+| 方法   | 路径                                                                 | 作用                                      |
+| ------ | -------------------------------------------------------------------- | ----------------------------------------- |
+| `GET`  | `/tasks/{task_id}/conversation/messages`                             | 获取当前任务的持久对话                    |
+| `POST` | `/tasks/{task_id}/conversation/messages`                             | 发送消息，可携带当前作品、页面和内容块 ID |
+| `GET`  | `/tasks/{task_id}/creative-artifacts`                                | 获取作品及所有不可覆盖版本                |
+| `GET`  | `/tasks/{task_id}/creative-artifacts/{artifact_id}`                  | 获取单个作品版本                          |
+| `GET`  | `/tasks/{task_id}/creative-artifacts/{artifact_id}/export.md`        | 导出该版本 Markdown                       |
+| `GET`  | `/tasks/{task_id}/creative-artifacts/{artifact_id}/exports/{format}` | 导出 `docx/html/txt/pdf/pptx`             |
 
 ### 8.2 字形与参考资料
 
@@ -494,17 +507,17 @@ LangGraph PostgreSQL Checkpointer 使用其自有检查点表，不与上述业�
 
 ### 8.3 内容与导出
 
-| 方法   | 路径                                                    | 作用                                           |
-| ------ | ------------------------------------------------------- | ---------------------------------------------- |
-| `GET`  | `/tasks/{task_id}/narrative-routes`                     | 获取候选叙事路线                               |
-| `POST` | `/tasks/{task_id}/narrative-routes/{route_id}/select`   | 选择路线并恢复工作流                           |
-| `GET`  | `/tasks/{task_id}/communication-package`                | 获取文化母题、三类成品与验收结果               |
-| `GET`  | `/tasks/{task_id}/contents`                             | 获取旧版内容或传播成品版本列表（兼容）         |
-| `POST` | `/tasks/{task_id}/regenerate`                           | 按 `asset_type` 与可选 `asset_index` 局部再生成 |
-| `PUT`  | `/tasks/{task_id}/contents/{version}`                   | 保存用户编辑                                   |
-| `POST` | `/tasks/{task_id}/contents/{version}/activate`          | 恢复历史版本并创建新版本                       |
-| `POST` | `/tasks/{task_id}/exports`                              | 生成 Markdown、HTML 或 JSON                    |
-| `GET`  | `/tasks/{task_id}/export.md`                            | 下载当前 Markdown 快照                         |
+| 方法   | 路径                                                  | 作用                                            |
+| ------ | ----------------------------------------------------- | ----------------------------------------------- |
+| `GET`  | `/tasks/{task_id}/narrative-routes`                   | 获取候选叙事路线                                |
+| `POST` | `/tasks/{task_id}/narrative-routes/{route_id}/select` | 选择路线并恢复工作流                            |
+| `GET`  | `/tasks/{task_id}/communication-package`              | 获取文化母题、三类成品与验收结果                |
+| `GET`  | `/tasks/{task_id}/contents`                           | 获取旧版内容或传播成品版本列表（兼容）          |
+| `POST` | `/tasks/{task_id}/regenerate`                         | 按 `asset_type` 与可选 `asset_index` 局部再生成 |
+| `PUT`  | `/tasks/{task_id}/contents/{version}`                 | 保存用户编辑                                    |
+| `POST` | `/tasks/{task_id}/contents/{version}/activate`        | 恢复历史版本并创建新版本                        |
+| `POST` | `/tasks/{task_id}/exports`                            | 生成 Markdown、HTML 或 JSON                     |
+| `GET`  | `/tasks/{task_id}/export.md`                          | 下载当前 Markdown 快照                          |
 
 ### 8.4 通用响应
 
@@ -591,7 +604,11 @@ Web Search Result / 当前任务 Upload
 
 ## 11. 前端页面设计
 
-### 11.1 任务创建页 `/`
+### 11.1 首页与一级入口
+
+首页 `/` 负责项目介绍、通用需求输入和演示任务；`/research` 是汉字研究入口，`/communication` 是文化传播入口。三页使用同一三栏外壳和右侧需求输入，但提供不同的引导文案与示例。
+
+任务创建能力包括：
 
 - 大文本输入框；
 - 受众、传播媒介、表达风格和时长快捷设置；
@@ -608,20 +625,23 @@ Web Search Result / 当前任务 Upload
 
 采用 PRD 规定的三栏布局，执行日志降为可折叠辅助信息：
 
-- 左栏：CommunicationBrief、成功标准、当前探索问题、预算、下一动作与决策摘要；
-- 中栏：主时间线、草书支线、多模态观察、异体图库、阶段对比与视觉钩子；
-- 右栏：2–3 条叙事路线、推荐原因、路线选择和本次参考资料。
+- 左栏：固定为首页、汉字研究、文化传播，并展示当前任务与连接状态；
+- 中栏汉字研究：字形演化、研究资料两个内部视图；
+- 中栏文化传播：创作作品、任务进展两个内部视图；
+- 中栏作品：分页文档/幻灯片切换、页面缩略图、可选择内容块以及 Word/HTML/TXT/PDF/PPT 下载；
+- 右栏：跨工作空间持续存在的对话、行动摘要、工具动作和输入框；将当前页面/内容块选择随消息发送。
+
+URL 使用 `space=research|communication` 表示一级工作空间，使用 `view=evolution|sources|output|task` 表示内部视图。智能体返回 `workspace_view` 时，前端只在确有研究或作品结果时自动切换；普通对话不会打断用户当前查看位置。
 
 窄屏可改为标签页，但信息结构保持一致。
 
-### 11.4 文化传播页 `/tasks/{id}/content`
+### 11.4 文化传播作品视图
 
-- 选定的文化母题、核心信息和视觉序列；
-- 互动文化长页预览与编辑；
-- 五张图文卡片顺序、文案、图片建议和单卡再生成；
-- 60 秒短视频分镜、旁白、字幕和节奏点；
-- 传播目标验收与定向返工记录；
-- Markdown、HTML、JSON 导出。
+- 展示用户通过对话创建的任意图文内容，不限定为固定传播包；
+- 统一 `RichArtifactDocument` 在中栏渲染为 A4 风格分页文档或 16:9 幻灯片；
+- 点击标题、正文、列表、引语或图片后高亮所选内容，并向右栏提供“修改这里”的精确上下文；
+- 真实历史字形使用公开书体名称作为图注，不显示内部图片编号、代码点、数据集名称和存储路径；
+- 视频/动画请求只生成脚本；公开下载格式固定为 Word、HTML、TXT、PDF、PPT。
 
 ---
 
@@ -826,12 +846,13 @@ Web Search Result / 当前任务 Upload
 
 ---
 
-## 16. 当前下一阶段：参赛质量打磨与发布加固
+## 16. 当前下一阶段：图文生成质量与对话编辑打磨
 
-从 Brief、双探索、路线选择到三类传播成品、独立验收、单片段版本化改写和整包导出的主闭环已经通过真实模型端到端验证。下一轮按以下方向打磨：
+持续对话、真实字形、多模态观察、统一图文文档、前端预览、块级修订和五格式导出已形成闭环。下一轮按以下方向打磨：
 
 ```text
-四个核心案例真实模型重复验收与成本统计
+四个核心案例的图文丰富度、分页质量与多轮块级修改验收
+→ 接入可控的文化配图生成/用户图片编排，并与真实历史字形严格区分
 → 目标用户可理解度、兴趣度、分享意愿和媒介适配测试
 → 上传限流、身份认证、解析超时、恶意文件扫描与公开部署配置
 ```

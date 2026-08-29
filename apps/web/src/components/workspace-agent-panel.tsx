@@ -13,6 +13,8 @@ import type {
 
 type WorkspaceAgentPanelProps = {
   activeArtifactId?: string;
+  activePageId?: string;
+  activeBlockId?: string;
   acknowledging: boolean;
   error: string;
   events: WorkflowEvent[];
@@ -56,6 +58,8 @@ const STATUS_COPY: Record<string, { title: string; body: string }> = {
 
 export function WorkspaceAgentPanel({
   activeArtifactId,
+  activePageId,
+  activeBlockId,
   acknowledging,
   error,
   events,
@@ -148,6 +152,8 @@ export function WorkspaceAgentPanel({
         task.id,
         message,
         activeArtifactId,
+        activePageId,
+        activeBlockId,
       );
       setMessages((current) => [
         ...current,
@@ -401,10 +407,14 @@ export function WorkspaceAgentPanel({
               <span className="chat-message-avatar">脉</span>
             )}
             <div>
-              <p>{message.content}</p>
+              <p>
+                {message.role === "assistant"
+                  ? toPublicCopy(message.content)
+                  : message.content}
+              </p>
               {message.role === "assistant" && message.state.action_summary && (
                 <small className="chat-action-summary">
-                  {message.state.action_summary}
+                  {toPublicCopy(message.state.action_summary)}
                 </small>
               )}
               {message.role === "assistant" &&

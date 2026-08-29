@@ -370,6 +370,50 @@ class ConversationTurnPlan(BaseModel):
     needs_glyph_context: bool = False
 
 
+class RichBlockKind(StrEnum):
+    HEADING = "heading"
+    PARAGRAPH = "paragraph"
+    LIST = "list"
+    QUOTE = "quote"
+    IMAGE = "image"
+    CAPTION = "caption"
+
+
+class RichContentBlock(BaseModel):
+    block_id: str = Field(min_length=2, max_length=80)
+    kind: RichBlockKind
+    text: str = Field(default="", max_length=12000)
+    level: int | None = Field(default=None, ge=1, le=3)
+    image_id: str | None = Field(default=None, max_length=160)
+    image_url: str | None = Field(default=None, max_length=500)
+    alt_text: str = Field(default="", max_length=300)
+    caption: str = Field(default="", max_length=500)
+    source_kind: Literal["glyph", "generated", "upload"] | None = None
+    locked: bool = False
+
+
+class RichContentPage(BaseModel):
+    page_id: str = Field(min_length=2, max_length=80)
+    title: str = Field(min_length=1, max_length=200)
+    layout: Literal["cover", "feature", "split", "text", "gallery"] = "text"
+    blocks: list[RichContentBlock] = Field(default_factory=list, max_length=24)
+
+
+RichExportFormat = Literal["docx", "html", "txt", "pdf", "pptx"]
+
+
+def _default_rich_export_formats() -> list[RichExportFormat]:
+    return ["docx", "html", "txt", "pdf", "pptx"]
+
+
+class RichArtifactDocument(BaseModel):
+    schema_version: Literal["1.0"] = "1.0"
+    title: str = Field(min_length=2, max_length=200)
+    theme: Literal["character-vein", "museum", "ink", "classroom", "minimal"] = "character-vein"
+    pages: list[RichContentPage] = Field(min_length=1, max_length=40)
+    supported_formats: list[RichExportFormat] = Field(default_factory=_default_rich_export_formats)
+
+
 class CreativeArtifactDraft(BaseModel):
     artifact_type: str = Field(min_length=2, max_length=80)
     format_label: str = Field(min_length=2, max_length=80)
@@ -379,6 +423,9 @@ class CreativeArtifactDraft(BaseModel):
     target_artifact_id: str | None = Field(default=None, max_length=36)
     reference_ids: list[str] = Field(default_factory=list)
     visual_hook_ids: list[str] = Field(default_factory=list)
+    rich_document: RichArtifactDocument | None = None
+    target_page_id: str | None = Field(default=None, max_length=80)
+    target_block_id: str | None = Field(default=None, max_length=80)
 
     @model_validator(mode="after")
     def normalize_artifact_references(self) -> "CreativeArtifactDraft":

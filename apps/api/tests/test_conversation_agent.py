@@ -25,6 +25,16 @@ class FakeConversationProvider(AliyunBailianTextProvider):
     async def _json_completion(self, system: str, payload: object) -> dict[str, Any]:
         self.calls.append((system, payload))
         if "意图路由器" in system:
+            if isinstance(payload, dict) and "视频" in str(payload.get("message", "")):
+                return {
+                    "intent": "create",
+                    "action_summary": "创作视频内容",
+                    "artifact_type": "短视频",
+                    "target_artifact_id": None,
+                    "needs_web_search": False,
+                    "search_query": None,
+                    "needs_glyph_context": False,
+                }
             return {
                 "intent": "create",
                 "action_summary": "创作三分钟校园广播稿",
@@ -34,15 +44,18 @@ class FakeConversationProvider(AliyunBailianTextProvider):
                 "search_query": None,
                 "needs_glyph_context": True,
             }
+        is_video = isinstance(payload, dict) and "视频" in str(payload.get("message", ""))
         return {
             "intent": "create",
-            "assistant_message": "广播稿已经生成，可以继续调整语气或长度。",
+            "assistant_message": (
+                "视频已经生成。" if is_video else "广播稿已经生成，可以继续调整语气或长度。"
+            ),
             "action_summary": "会被规划结果覆盖",
             "workspace_view": "artifact",
             "artifact": {
-                "artifact_type": "校园广播稿",
-                "format_label": "广播稿",
-                "title": "听见“雷”：校园午间三分钟",
+                "artifact_type": "短视频" if is_video else "校园广播稿",
+                "format_label": "视频" if is_video else "广播稿",
+                "title": "听见“雷”" if is_video else "听见“雷”：校园午间三分钟",
                 "summary": "面向中学生的声音想象广播稿",
                 "content_markdown": (
                     "# 听见雷\n\n同学们，先闭上眼睛想象一声由远及近的雷鸣。"
@@ -89,6 +102,43 @@ async def test_conversation_generation_keeps_open_artifact_and_filters_machine_i
     assert output.artifact.reference_ids == ["reference-one"]
     assert output.artifact.visual_hook_ids == ["glyph-one"]
     assert "校园午间三分钟" in output.artifact.title
+
+
+async def test_video_request_is_always_normalized_to_editable_script() -> None:
+    provider = FakeConversationProvider()
+    plan = await provider.plan_conversation_turn("生成一段关于雷字的短视频", [], [], "雷")
+    output = await provider.generate_conversation_turn(
+        plan,
+        "生成一段关于雷字的短视频",
+        [],
+        {"character": "雷", "reference_materials": [], "glyph_stages": []},
+        [],
+    )
+
+    assert plan.artifact_type == "视频脚本"
+    assert output.artifact is not None
+    assert output.artifact.artifact_type == "视频脚本"
+    assert output.artifact.format_label == "视频脚本"
+    assert "脚本" in output.artifact.title
+    assert "视频脚本" in output.assistant_message
+    assert "视频已经生成" not in output.assistant_message
+
+
+async def test_deterministic_video_request_creates_script_not_video_file() -> None:
+    provider = DeterministicTextProvider()
+    plan = await provider.plan_conversation_turn("帮我生成一个雷字动画", [], [], "雷")
+    output = await provider.generate_conversation_turn(
+        plan,
+        "帮我生成一个雷字动画",
+        [],
+        {"character": "雷"},
+        [],
+    )
+
+    assert plan.intent == ConversationIntent.CREATE
+    assert plan.artifact_type == "视频脚本"
+    assert output.artifact is not None
+    assert output.artifact.artifact_type == "视频脚本"
 
 
 async def test_deterministic_planner_distinguishes_discussion_revision_and_transform() -> None:
@@ -141,3 +191,25 @@ def test_visual_only_context_keeps_positive_scripts_and_removes_references() -> 
     }
     assert context["reference_materials"] == []
     assert context["response_scope"] == "visual_features_only"
+
+
+def test_conversation_context_keeps_public_fixture_and_hides_glyph_metadata() -> None:
+    task = TaskRecord(
+        id="task-1",
+        status="awaiting_confirmation",
+        raw_input="研究雷字",
+        spec={},
+        selected_route_id=None,
+    )
+
+    context = ConversationService._task_context(
+        task,
+        TaskSpec(target_characters=["雷"]),
+        case_evolution_package("雷"),
+        "雷字有哪些文化含义？",
+    )
+
+    references = context["reference_materials"]
+    assert references
+    assert {item["title"] for item in references} == {"古今汉字的演变"}
+    assert all("JieZi" not in str(item) for item in references)

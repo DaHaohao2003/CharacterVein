@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from character_vein_api.artifact_documents import build_rich_document
 from character_vein_api.models import (
     AssetRecord,
     AuditRunRecord,
@@ -32,6 +33,7 @@ from character_vein_domain import (
     EvidenceUsability,
     EvolutionPackage,
     RetrievedEvidence,
+    RichArtifactDocument,
     Source,
     SourceOrigin,
     TaskSpec,
@@ -166,6 +168,17 @@ class CreativeArtifactRepository:
                 CreativeArtifactRecord.lineage_id == lineage_id
             )
         )
+        parent_document = (
+            RichArtifactDocument.model_validate(parent.document_json)
+            if parent is not None and parent.document_json
+            else None
+        )
+        if intent == ConversationIntent.REVISE and parent is not None:
+            # Historical glyphs are registered source material. A prose/layout
+            # revision keeps the exact image set instead of accepting a model-
+            # invented replacement ID.
+            draft.visual_hook_ids = list(parent.visual_hook_ids or [])
+        document = build_rich_document(draft, parent_document)
         record = CreativeArtifactRecord(
             id=record_id,
             task_id=task_id,
@@ -177,6 +190,7 @@ class CreativeArtifactRepository:
             title=draft.title,
             summary=draft.summary,
             content_markdown=draft.content_markdown,
+            document_json=document.model_dump(mode="json"),
             version=(latest_version or 0) + 1,
             reference_ids=draft.reference_ids,
             visual_hook_ids=draft.visual_hook_ids,
@@ -724,6 +738,21 @@ class GlyphImageRepository:
 
     async def get(self, image_id: str) -> GlyphImageRecord | None:
         return await self.session.get(GlyphImageRecord, image_id)
+
+    async def get_compatible(self, image_id: str) -> GlyphImageRecord | None:
+        record = await self.get(image_id)
+        if record is not None or "." in image_id.rsplit("/", maxsplit=1)[-1]:
+            return record
+        candidates = [f"{image_id}.{extension}" for extension in ("png", "jpg", "jpeg")]
+        return cast(
+            GlyphImageRecord | None,
+            await self.session.scalar(
+                select(GlyphImageRecord)
+                .where(GlyphImageRecord.id.in_(candidates))
+                .order_by(GlyphImageRecord.id)
+                .limit(1)
+            ),
+        )
 
     async def get_representative(self, character: str, script_code: str) -> GlyphImageRecord | None:
         return cast(

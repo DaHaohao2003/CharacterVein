@@ -102,6 +102,7 @@ class CreativeArtifactRecord(Base):
     title: Mapped[str] = mapped_column(String(160))
     summary: Mapped[str] = mapped_column(Text)
     content_markdown: Mapped[str] = mapped_column(Text)
+    document_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     version: Mapped[int] = mapped_column(default=1)
     reference_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
     visual_hook_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)

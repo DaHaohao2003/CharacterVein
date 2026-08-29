@@ -29,6 +29,8 @@ yarn-error.log*
 .venv/
 .venv-codex/
 .uv-cache/
+.uv-cache-task/
+.uv-python-task/
 __pycache__/
 *.py[cod]
 .pytest_cache/

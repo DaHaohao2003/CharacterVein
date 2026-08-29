@@ -26,6 +26,7 @@ from character_vein_domain import (
     EvolutionPackage,
     GlyphLineageRole,
     RetrievedGlyphImage,
+    SourceOrigin,
     TaskSpec,
 )
 from character_vein_providers import extract_explicit_hanzi_target
@@ -46,6 +47,8 @@ class ConversationService:
         content: str,
         *,
         active_artifact_id: str | None = None,
+        active_page_id: str | None = None,
+        active_block_id: str | None = None,
     ) -> ConversationTurnResponse:
         user_message = await self.messages.add(task_id=task.id, role="user", content=content)
         history_records = await self.messages.list(task.id, limit=30)
@@ -58,6 +61,11 @@ class ConversationService:
         if active_artifact_id is not None:
             artifact_records.sort(key=lambda item: item.id != active_artifact_id)
         artifacts = [self._artifact_context(item) for item in artifact_records]
+        if artifacts and active_artifact_id is not None:
+            artifacts[0]["selection"] = {
+                "page_id": active_page_id,
+                "block_id": active_block_id,
+            }
         spec = TaskSpec.model_validate(task.spec)
         explicit_target = extract_explicit_hanzi_target(content)
         if explicit_target is not None and (
@@ -79,6 +87,11 @@ class ConversationService:
             await self.repository.save(task)
         character = spec.target_characters[0] if spec.target_characters else None
         plan = await self.provider.plan_conversation_turn(content, history, artifacts, character)
+        if character is not None and plan.intent in {
+            ConversationIntent.CREATE,
+            ConversationIntent.TRANSFORM,
+        }:
+            plan.needs_glyph_context = True
         if (
             plan.intent in {ConversationIntent.REVISE, ConversationIntent.TRANSFORM}
             and not artifacts
@@ -104,6 +117,12 @@ class ConversationService:
 
         artifact_record: CreativeArtifactRecord | None = None
         if output.artifact is not None:
+            output.artifact.target_page_id = active_page_id
+            output.artifact.target_block_id = active_block_id
+            if evolution is not None and not output.artifact.visual_hook_ids:
+                output.artifact.visual_hook_ids = [
+                    stage.image_id for stage in evolution.glyph_stages if stage.image_id is not None
+                ][:6]
             artifact_record = await self.artifacts.create(
                 task_id=task.id,
                 draft=output.artifact,
@@ -278,6 +297,7 @@ class ConversationService:
             "title": record.title,
             "summary": record.summary,
             "content_markdown": record.content_markdown,
+            "rich_document": record.document_json,
             "version": record.version,
         }
 
@@ -313,6 +333,11 @@ class ConversationService:
         )
         if evolution is not None:
             for item in evolution.evidence:
+                if item.origin not in {SourceOrigin.WEB, SourceOrigin.USER_UPLOAD} and not (
+                    item.origin == SourceOrigin.FIXTURE
+                    and item.metadata.get("kind") == "evolution_framework"
+                ):
+                    continue
                 searchable = " ".join(
                     [item.evidence_id, item.source_id, item.title, item.url or ""]
                 ).lower()

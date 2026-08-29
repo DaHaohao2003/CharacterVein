@@ -24,6 +24,8 @@ dependencies = [
     "character-vein-providers",
     "character-vein-retrieval",
     "character-vein-workflows",
+    "python-pptx>=1.0.2",
+    "reportlab>=5.0.1",
 ]
 
 [dependency-groups]

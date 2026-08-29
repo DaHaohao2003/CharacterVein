@@ -113,12 +113,16 @@ export function sendConversationMessage(
   taskId: string,
   content: string,
   activeArtifactId?: string,
+  activePageId?: string,
+  activeBlockId?: string,
 ): Promise<ConversationTurn> {
   return request<ConversationTurn>(`/tasks/${taskId}/conversation/messages`, {
     method: "POST",
     body: JSON.stringify({
       content,
       active_artifact_id: activeArtifactId || null,
+      active_page_id: activePageId || null,
+      active_block_id: activeBlockId || null,
     }),
   });
 }
@@ -134,6 +138,14 @@ export function creativeArtifactExportUrl(
   artifactId: string,
 ): string {
   return `/backend/api/v1/tasks/${taskId}/creative-artifacts/${artifactId}/export.md`;
+}
+
+export function richArtifactExportUrl(
+  taskId: string,
+  artifactId: string,
+  format: "docx" | "html" | "txt" | "pdf" | "pptx",
+): string {
+  return `/backend/api/v1/tasks/${taskId}/creative-artifacts/${artifactId}/exports/${format}`;
 }
 
 export function searchGlyphImages(options: {

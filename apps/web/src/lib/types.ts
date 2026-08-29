@@ -280,6 +280,7 @@ export type Evidence = {
   origin: "web" | "user_upload" | "fixture";
   task_id?: string;
   asset_id?: string;
+  metadata?: Record<string, unknown>;
   usability: "usable" | "partial" | "metadata_only" | "unusable";
   retrieved_at?: string;
 };
@@ -432,11 +433,43 @@ export type CreativeArtifact = {
   title: string;
   summary: string;
   content_markdown: string;
+  rich_document: RichArtifactDocument;
   version: number;
   reference_ids: string[];
   visual_hook_ids: string[];
   status: string;
   created_at: string;
+};
+
+export type RichBlockKind =
+  "heading" | "paragraph" | "list" | "quote" | "image" | "caption";
+
+export type RichContentBlock = {
+  block_id: string;
+  kind: RichBlockKind;
+  text: string;
+  level: number | null;
+  image_id: string | null;
+  image_url: string | null;
+  alt_text: string;
+  caption: string;
+  source_kind: "glyph" | "generated" | "upload" | null;
+  locked: boolean;
+};
+
+export type RichContentPage = {
+  page_id: string;
+  title: string;
+  layout: "cover" | "feature" | "split" | "text" | "gallery";
+  blocks: RichContentBlock[];
+};
+
+export type RichArtifactDocument = {
+  schema_version: "1.0";
+  title: string;
+  theme: "character-vein" | "museum" | "ink" | "classroom" | "minimal";
+  pages: RichContentPage[];
+  supported_formats: Array<"docx" | "html" | "txt" | "pdf" | "pptx">;
 };
 
 export type ConversationTurn = {

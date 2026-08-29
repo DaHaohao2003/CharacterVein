@@ -5,12 +5,16 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import { AppNavigation, type WorkspaceView } from "@/components/app-navigation";
+import {
+  AppNavigation,
+  type PrimarySection,
+  type WorkspaceView,
+} from "@/components/app-navigation";
 import { WorkspaceAgentPanel } from "@/components/workspace-agent-panel";
+import { RichDocumentPreview } from "@/components/rich-document-preview";
 import {
   acknowledgeLimitations,
   createTask,
-  creativeArtifactExportUrl,
   exportUrl,
   getCreativeArtifacts,
   getEvents,
@@ -20,15 +24,37 @@ import {
   searchGlyphImages,
   selectNarrativeRoute,
 } from "@/lib/api";
-import { toPublicCopy, toPublicToolName } from "@/lib/public-copy";
+import { toPublicCopy } from "@/lib/public-copy";
 import type {
   ConversationTurn,
   CreativeArtifact,
+  Evidence,
   GlyphImageSearchResult,
   GlyphStage,
   Task,
   WorkflowEvent,
 } from "@/lib/types";
+
+function isGenerationReference(item: Evidence): boolean {
+  const searchable = [
+    item.evidence_id,
+    item.source_id,
+    item.title,
+    item.url ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  if (searchable.includes("jiezi")) return false;
+  if (item.origin === "web" || item.origin === "user_upload") return true;
+  return item.metadata?.kind === "evolution_framework";
+}
+
+function isInternalGlyphNote(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return ["jiezi", "元数据", "原始路径", "数据集", "image_id", "u+"].some(
+    (marker) => normalized.includes(marker),
+  );
+}
 
 const SCRIPT_CODES: Record<string, string> = {
   甲骨文: "J",
@@ -400,6 +426,8 @@ export default function WorkspacePage() {
   const [events, setEvents] = useState<WorkflowEvent[]>([]);
   const [artifacts, setArtifacts] = useState<CreativeArtifact[]>([]);
   const [selectedArtifactId, setSelectedArtifactId] = useState("");
+  const [selectedPageId, setSelectedPageId] = useState("");
+  const [selectedBlockId, setSelectedBlockId] = useState("");
   const [running, setRunning] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const [selectingRoute, setSelectingRoute] = useState("");
@@ -408,14 +436,25 @@ export default function WorkspacePage() {
   const [evolutionView, setEvolutionView] = useState<
     "shape" | "meaning" | "culture"
   >("shape");
+  const requestedSpace = searchParams.get("space");
   const requestedView = searchParams.get("view");
+  const initialSection: Exclude<PrimarySection, "home"> =
+    requestedSpace === "research" ||
+    requestedView === "evolution" ||
+    requestedView === "sources"
+      ? "research"
+      : "communication";
+  const [currentSection, setCurrentSection] =
+    useState<Exclude<PrimarySection, "home">>(initialSection);
   const [currentView, setCurrentView] = useState<WorkspaceView>(
     requestedView === "evolution" ||
       requestedView === "sources" ||
       requestedView === "output" ||
       requestedView === "task"
       ? requestedView
-      : "output",
+      : initialSection === "research"
+        ? "evolution"
+        : "output",
   );
   const bootstrapConversation = searchParams.get("chat") === "1";
   const [error, setError] = useState("");
@@ -530,7 +569,22 @@ export default function WorkspacePage() {
       task.input_asset_ids,
       task.spec.web_search_enabled,
     );
-    router.push(`/tasks/${created.id}/workspace?chat=1`);
+    const view = currentSection === "research" ? "evolution" : "output";
+    router.push(
+      `/tasks/${created.id}/workspace?space=${currentSection}&view=${view}&chat=1`,
+    );
+  }
+
+  function navigateWorkspace(
+    section: Exclude<PrimarySection, "home">,
+    view?: WorkspaceView,
+  ) {
+    const nextView = view ?? (section === "research" ? "evolution" : "output");
+    setCurrentSection(section);
+    setCurrentView(nextView);
+    router.replace(`/tasks/${id}/workspace?space=${section}&view=${nextView}`, {
+      scroll: false,
+    });
   }
 
   async function handleConversationTurn(turn: ConversationTurn) {
@@ -542,20 +596,26 @@ export default function WorkspacePage() {
     setTask(latestTask);
     setEvents(latestEvents);
     setArtifacts(latestArtifacts);
-    if (turn.artifact) setSelectedArtifactId(turn.artifact.id);
-    const viewMap: Record<ConversationTurn["workspace_view"], WorkspaceView> = {
-      conversation: "task",
-      evolution: "evolution",
-      sources: "sources",
-      artifact: "output",
-    };
-    setCurrentView(viewMap[turn.workspace_view]);
+    if (turn.artifact) {
+      setSelectedArtifactId(turn.artifact.id);
+      setSelectedPageId(turn.artifact.rich_document.pages[0]?.page_id ?? "");
+      setSelectedBlockId("");
+    }
+    if (turn.workspace_view === "evolution") {
+      navigateWorkspace("research", "evolution");
+    } else if (turn.workspace_view === "sources") {
+      navigateWorkspace("research", "sources");
+    } else if (turn.workspace_view === "artifact") {
+      navigateWorkspace("communication", "output");
+    }
   }
 
   if (!task)
     return <main className="loading">{error || "正在载入工作台…"}</main>;
 
   const evolution = task.evolution_package;
+  const generationReferences =
+    evolution?.evidence.filter(isGenerationReference) ?? [];
   const content = task.generated_content;
   const selectedArtifact =
     artifacts.find((item) => item.id === selectedArtifactId) ?? artifacts[0];
@@ -571,9 +631,10 @@ export default function WorkspacePage() {
     evolution?.glyph_stages.find(
       (stage) => stage.stage_id === selectedStageId,
     ) ?? mainlineStages.find((stage) => stage.availability === "available");
-  const availableMainlineCount = mainlineStages.filter(
-    (stage) => stage.availability === "available",
-  ).length;
+  const recentProgressEvents = events
+    .filter((event) => event.summary.trim().length > 0)
+    .slice(-8)
+    .reverse();
   const visualAnalysis = evolution?.visual_analysis;
   const selectedVisualObservation = selectedStage
     ? visualAnalysis?.stage_observations.find(
@@ -585,10 +646,9 @@ export default function WorkspacePage() {
   return (
     <main className="agent-app-shell workspace-agent-shell">
       <AppNavigation
-        active="workspace"
+        active={currentSection}
         character={task.spec.target_characters.join("")}
-        currentView={currentView}
-        onViewChange={setCurrentView}
+        onSectionChange={navigateWorkspace}
         status={task.status}
         taskId={id}
       />
@@ -596,153 +656,186 @@ export default function WorkspacePage() {
       <section className="agent-canvas workspace-canvas">
         <header className="workspace-canvas-header">
           <div>
-            <p className="eyebrow">CULTURAL COMMUNICATION WORKSPACE</p>
+            <p className="eyebrow">
+              {currentSection === "research"
+                ? "HANZI RESEARCH WORKSPACE"
+                : "CULTURAL COMMUNICATION WORKSPACE"}
+            </p>
             <h1>
               {task.spec.target_characters.length
-                ? `“${task.spec.target_characters.join("")}”字文化创作空间`
-                : "汉字文化创作空间"}
+                ? `“${task.spec.target_characters.join("")}”字${currentSection === "research" ? "研究空间" : "文化传播空间"}`
+                : currentSection === "research"
+                  ? "汉字研究空间"
+                  : "文化传播空间"}
             </h1>
             <p>
-              通过右侧对话提问、研究、生成任意传播内容，并持续修改或转换形式。
+              {currentSection === "research"
+                ? "观察历史字形，结合网络与上传资料持续追问；研究结果会保留给文化传播使用。"
+                : "使用当前研究上下文生成文章、讲稿、图文方案、教育内容或视频脚本，并通过对话持续修改或转换形式。"}
             </p>
           </div>
-          <div className="workspace-canvas-actions">
-            {selectedArtifact && (
-              <a
-                className="button-link button-link--secondary"
-                href={creativeArtifactExportUrl(id, selectedArtifact.id)}
-              >
-                导出当前作品
-              </a>
-            )}
-            {!selectedArtifact && content && (
-              <Link
-                className="button-link button-link--secondary"
-                href={`/tasks/${id}/content`}
-              >
-                编辑内容
-              </Link>
-            )}
-            {!selectedArtifact && content && (
-              <a
-                className="button-link button-link--secondary"
-                href={exportUrl(id)}
-              >
-                导出
-              </a>
-            )}
-          </div>
+          {currentSection === "communication" && (
+            <div className="workspace-canvas-actions">
+              {selectedArtifact && (
+                <span className="workspace-format-summary">
+                  Word · HTML · TXT · PDF · PPT
+                </span>
+              )}
+              {!selectedArtifact && content && (
+                <Link
+                  className="button-link button-link--secondary"
+                  href={`/tasks/${id}/content`}
+                >
+                  编辑内容
+                </Link>
+              )}
+              {!selectedArtifact && content && (
+                <a
+                  className="button-link button-link--secondary"
+                  href={exportUrl(id)}
+                >
+                  导出
+                </a>
+              )}
+            </div>
+          )}
         </header>
+
+        <nav
+          className="workspace-subnav"
+          aria-label={`${currentSection === "research" ? "汉字研究" : "文化传播"}工作区视图`}
+        >
+          {currentSection === "research" ? (
+            <>
+              <button
+                className={currentView === "evolution" ? "is-active" : ""}
+                onClick={() => navigateWorkspace("research", "evolution")}
+                type="button"
+              >
+                <span>字</span>字形演化
+              </button>
+              <button
+                className={currentView === "sources" ? "is-active" : ""}
+                onClick={() => navigateWorkspace("research", "sources")}
+                type="button"
+              >
+                <span>源</span>研究资料
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={currentView === "output" ? "is-active" : ""}
+                onClick={() => navigateWorkspace("communication", "output")}
+                type="button"
+              >
+                <span>稿</span>创作作品
+              </button>
+              <button
+                className={currentView === "task" ? "is-active" : ""}
+                onClick={() => navigateWorkspace("communication", "task")}
+                type="button"
+              >
+                <span>序</span>任务进展
+              </button>
+            </>
+          )}
+        </nav>
 
         <div className="workspace-view-stack">
           {currentView === "task" && (
             <section className="panel workspace-overview-panel">
-              <h2>任务与执行</h2>
-              <dl className="task-facts">
-                <dt>受众</dt>
-                <dd>{task.spec.audience}</dd>
-                <dt>时长</dt>
-                <dd>{task.spec.duration_minutes} 分钟</dd>
-                <dt>阶段</dt>
-                <dd>
-                  主干 {availableMainlineCount} 个可用 · 要求至少{" "}
-                  {task.spec.required_stages} 个
-                </dd>
-              </dl>
-              {task.agent_runtime.decision_summary && (
-                <section className="agent-decision-card">
-                  <small>当前决策 · {task.agent_runtime.current_phase}</small>
-                  <strong>{task.agent_runtime.next_action}</strong>
-                  <p>{toPublicCopy(task.agent_runtime.decision_summary)}</p>
+              <header className="task-progress-heading">
+                <div>
+                  <p className="eyebrow">TASK PROGRESS</p>
+                  <h2>任务进展</h2>
+                </div>
+                <p>这里只展示与你有关的需求、结果和待办。</p>
+              </header>
+
+              <div className="task-progress-summary">
+                <article>
+                  <span>当前需求</span>
+                  <h3>
+                    {task.spec.target_characters.length
+                      ? `围绕“${task.spec.target_characters.join("")}”继续研究与创作`
+                      : "继续明确本次任务"}
+                  </h3>
+                  <p>
+                    {toPublicCopy(
+                      task.agent_runtime.decision_summary || task.raw_input,
+                    )}
+                  </p>
+                </article>
+                <article>
+                  <span>已有结果</span>
+                  {selectedArtifact ? (
+                    <>
+                      <h3>{selectedArtifact.title}</h3>
+                      <p>
+                        已保留 {artifacts.length}{" "}
+                        个作品版本，可在“创作作品”中预览并继续修改。
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3>尚未生成作品</h3>
+                      <p>
+                        在右侧告诉智能体想创作的内容，结果会自动保存在这里。
+                      </p>
+                    </>
+                  )}
+                </article>
+              </div>
+
+              {(task.requires_user_confirmation ||
+                task.status === "awaiting_route_selection" ||
+                task.status === "failed") && (
+                <section className="task-progress-attention">
+                  <span>等待你决定</span>
+                  <p>
+                    {task.status === "awaiting_route_selection"
+                      ? "请选择更适合的文化叙事方向，智能体将沿该方向继续创作。"
+                      : task.status === "failed"
+                        ? "上一次执行没有完成，可以在右侧调整要求或从检查点恢复。"
+                        : "现有资料存在需要确认的边界，请在右侧查看并决定是否继续。"}
+                  </p>
                 </section>
               )}
-              {task.plan && (
-                <>
-                  <h3>Agent 计划</h3>
-                  <ol className="plan-list">
-                    {task.plan.map((step) => (
-                      <li
-                        className={`plan-step plan-step--${step.status}`}
-                        key={step.id}
-                      >
-                        <span>{step.status}</span>
-                        <strong>{step.title}</strong>
-                        <small>{step.agent}</small>
-                        {step.summary && <p>{toPublicCopy(step.summary)}</p>}
-                        {(step.tool_names?.length ?? 0) > 0 && (
-                          <small>
-                            工具：
-                            {step.tool_names.map(toPublicToolName).join(" · ")}
-                          </small>
-                        )}
-                        <details>
-                          <summary>验收与失败动作</summary>
-                          <small>完成标准：{step.completion_criteria}</small>
-                          <small>失败动作：{step.failure_action}</small>
-                          {(step.depends_on?.length ?? 0) > 0 && (
-                            <small>依赖：{step.depends_on.join(" → ")}</small>
-                          )}
-                        </details>
+
+              <section className="task-progress-history">
+                <header>
+                  <h3>最近完成</h3>
+                  <small>对话、研究和创作结果</small>
+                </header>
+                {recentProgressEvents.length ? (
+                  <ol>
+                    {recentProgressEvents.map((event) => (
+                      <li key={event.id}>
+                        <span aria-hidden="true">
+                          {event.status === "failed" ? "!" : "✓"}
+                        </span>
+                        <div>
+                          <p>{toPublicCopy(event.summary)}</p>
+                          <time dateTime={event.created_at}>
+                            {new Date(event.created_at).toLocaleString(
+                              "zh-CN",
+                              {
+                                month: "numeric",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </time>
+                        </div>
                       </li>
                     ))}
                   </ol>
-                </>
-              )}
-              <h3>运行记录</h3>
-              <ol className="event-list">
-                {events
-                  .slice(-30)
-                  .reverse()
-                  .map((event) => (
-                    <li key={event.id}>
-                      <span>{event.status}</span>
-                      {toPublicCopy(event.summary)}
-                    </li>
-                  ))}
-              </ol>
-              {(task.tool_calls?.length ?? 0) > 0 && (
-                <div className="tool-trace">
-                  <h3>工具调用轨迹</h3>
-                  {(task.tool_calls ?? [])
-                    .slice(-14)
-                    .reverse()
-                    .map((call) => (
-                      <article key={call.tool_call_id}>
-                        <header>
-                          <code>{call.tool_name}</code>
-                          <span>{call.status}</span>
-                        </header>
-                        <p>{toPublicCopy(call.input_summary)}</p>
-                        <small>
-                          {toPublicCopy(call.result_summary)} ·{" "}
-                          {call.duration_ms.toFixed(0)} ms · 第 {call.attempt}{" "}
-                          次
-                        </small>
-                      </article>
-                    ))}
-                </div>
-              )}
-              {task.retrieval_summary && (
-                <div className="retrieval-summary">
-                  <h3>检索问题与三路召回</h3>
-                  {task.retrieval_summary.map((summary, index) => (
-                    <details
-                      key={`${summary.query_id}-${summary.attempt}-${index}`}
-                    >
-                      <summary>
-                        {summary.purpose || summary.query_id} · 选出{" "}
-                        {summary.selected_count} 条
-                      </summary>
-                      <small>
-                        结构化 {summary.structured_matches} · 关键词{" "}
-                        {summary.keyword_matches} · 向量{" "}
-                        {summary.semantic_matches} · 第 {summary.attempt} 次
-                      </small>
-                      <p>{toPublicCopy(summary.query)}</p>
-                    </details>
-                  ))}
-                </div>
-              )}
+                ) : (
+                  <p className="empty">完成的研究或创作会显示在这里。</p>
+                )}
+              </section>
             </section>
           )}
 
@@ -975,23 +1068,29 @@ export default function WorkspacePage() {
                   )}
                   {evolutionView === "meaning" && (
                     <ul className="evolution-notes">
-                      {evolution.meaning_changes.map((item) => (
-                        <li key={item}>{toPublicCopy(item)}</li>
-                      ))}
+                      {evolution.meaning_changes
+                        .filter((item) => !isInternalGlyphNote(item))
+                        .map((item) => (
+                          <li key={item}>{toPublicCopy(item)}</li>
+                        ))}
                     </ul>
                   )}
                   {evolutionView === "culture" && (
                     <ul className="evolution-notes">
-                      {evolution.cultural_contexts.map((item) => (
-                        <li key={item}>{toPublicCopy(item)}</li>
-                      ))}
+                      {evolution.cultural_contexts
+                        .filter((item) => !isInternalGlyphNote(item))
+                        .map((item) => (
+                          <li key={item}>{toPublicCopy(item)}</li>
+                        ))}
                     </ul>
                   )}
                   {evolutionView === "shape" && (
                     <ol className="evolution-notes">
-                      {evolution.shape_changes.map((item) => (
-                        <li key={item}>{toPublicCopy(item)}</li>
-                      ))}
+                      {evolution.shape_changes
+                        .filter((item) => !isInternalGlyphNote(item))
+                        .map((item) => (
+                          <li key={item}>{toPublicCopy(item)}</li>
+                        ))}
                     </ol>
                   )}
                 </>
@@ -1006,23 +1105,23 @@ export default function WorkspacePage() {
                   <p className="eyebrow">REFERENCE CONTEXT</p>
                   <h2>本次生成参考</h2>
                 </div>
-                <span>{evolution?.evidence.length ?? 0} 条内容</span>
+                <span>{generationReferences.length} 条内容</span>
               </div>
               <p className="panel-note">
-                以下网络内容和用户资料会作为大模型的生成上下文，用于减少无依据补写；系统不执行逐句引用或事实核验。
+                以下公共资料、网络内容和用户资料会作为大模型的生成上下文，用于减少无依据补写；系统不执行逐句引用或事实核验。
               </p>
               <div className="workspace-source-grid">
-                {evolution?.evidence.length ? (
-                  evolution.evidence.map((item) => (
+                {generationReferences.length ? (
+                  generationReferences.map((item) => (
                     <article className="source-card" key={item.evidence_id}>
                       <p>
                         <strong>{item.title}</strong>
                         <span className="source-grade">
-                          {item.origin === "web"
-                            ? "网络"
-                            : item.origin === "user_upload"
-                              ? "我的资料"
-                              : "开发参考"}
+                          {item.origin === "user_upload"
+                            ? "我的资料"
+                            : item.origin === "fixture"
+                              ? "公共资料"
+                              : "网络"}
                         </span>
                       </p>
                       <blockquote>{item.quote_or_summary}</blockquote>
@@ -1108,7 +1207,13 @@ export default function WorkspacePage() {
                           artifact.id === selectedArtifact.id ? "is-active" : ""
                         }
                         key={artifact.id}
-                        onClick={() => setSelectedArtifactId(artifact.id)}
+                        onClick={() => {
+                          setSelectedArtifactId(artifact.id);
+                          setSelectedPageId(
+                            artifact.rich_document.pages[0]?.page_id ?? "",
+                          );
+                          setSelectedBlockId("");
+                        }}
                         type="button"
                       >
                         <span>{artifact.format_label}</span>
@@ -1117,30 +1222,15 @@ export default function WorkspacePage() {
                       </button>
                     ))}
                   </nav>
-                  <article className="creative-artifact-preview">
-                    <header>
-                      <div>
-                        <span>{selectedArtifact.format_label}</span>
-                        <h2>{toPublicCopy(selectedArtifact.title)}</h2>
-                        <p>{toPublicCopy(selectedArtifact.summary)}</p>
-                      </div>
-                      <small>版本 {selectedArtifact.version}</small>
-                    </header>
-                    <pre>{toPublicCopy(selectedArtifact.content_markdown)}</pre>
-                    <footer>
-                      <span>
-                        继续在右侧告诉智能体要修改的段落或新的传播形式。
-                      </span>
-                      <a
-                        href={creativeArtifactExportUrl(
-                          id,
-                          selectedArtifact.id,
-                        )}
-                      >
-                        导出 Markdown
-                      </a>
-                    </footer>
-                  </article>
+                  <RichDocumentPreview
+                    artifact={selectedArtifact}
+                    onSelect={(pageId, blockId) => {
+                      setSelectedPageId(pageId);
+                      setSelectedBlockId(blockId);
+                    }}
+                    selectedBlockId={selectedBlockId}
+                    selectedPageId={selectedPageId}
+                  />
                 </div>
               ) : content ? (
                 <article className="content-preview">
@@ -1158,7 +1248,7 @@ export default function WorkspacePage() {
                   <span>稿</span>
                   <h3>这里是动态作品工作区</h3>
                   <p>
-                    在右侧直接说“写一篇公众号文章”“生成课堂活动”或任何你需要的内容；生成后还可以继续修改和转换形式。
+                    在右侧直接说“写一篇文化文章”“设计五张图文卡片”或“生成视频脚本”；生成后还可以继续修改和转换形式。视频类需求只生成脚本，不会生成视频文件。
                   </p>
                 </div>
               )}
@@ -1169,6 +1259,8 @@ export default function WorkspacePage() {
 
       <WorkspaceAgentPanel
         activeArtifactId={selectedArtifact?.id}
+        activeBlockId={selectedBlockId}
+        activePageId={selectedPageId}
         acknowledging={acknowledging}
         error={error}
         events={events}

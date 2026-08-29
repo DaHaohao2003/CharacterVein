@@ -65,7 +65,7 @@ export default function ConfirmTaskPage() {
   return (
     <main className="agent-app-shell confirm-agent-shell">
       <AppNavigation
-        active="workspace"
+        active="communication"
         character={spec.target_characters.join("")}
         status={task.status}
         taskId={id}

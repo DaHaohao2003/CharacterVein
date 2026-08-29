@@ -20,6 +20,7 @@ from character_vein_domain import (
     ConversationTurnPlan,
     CreativeArtifactDraft,
     CulturalMotif,
+    Evidence,
     EvidenceSearchQuery,
     EvolutionPackage,
     ExplorationBudget,
@@ -31,11 +32,40 @@ from character_vein_domain import (
     ShortVideoScriptContent,
     SocialCard,
     SocialCardsContent,
+    SourceOrigin,
     TaskSpec,
     VideoScene,
     VisualHook,
     communication_brief_from_task_spec,
 )
+
+
+def _generation_evidence(evolution: EvolutionPackage) -> list[Evidence]:
+    """Return only material that may be exposed to text-generation paths.
+
+    Glyph dataset records remain internal image catalog data. They may supply
+    registered images and model-produced visual observations, but never source
+    prose, citations, identifiers, paths, or authorship metadata.
+    """
+
+    result: list[Evidence] = []
+    for item in evolution.evidence:
+        if item.origin not in {SourceOrigin.WEB, SourceOrigin.USER_UPLOAD} and not (
+            item.origin == SourceOrigin.FIXTURE
+            and item.metadata.get("kind") == "evolution_framework"
+        ):
+            continue
+        searchable = " ".join(
+            [item.evidence_id, item.source_id, item.title, item.url or ""]
+        ).lower()
+        if "jiezi" in searchable or item.metadata.get("kind") in {
+            "glyph_dataset",
+            "glyph_stage",
+            "glyph_context",
+        }:
+            continue
+        result.append(item)
+    return result
 
 
 def extract_explicit_hanzi_target(text: str) -> str | None:
@@ -258,6 +288,10 @@ class DeterministicTextProvider:
                 "讲稿",
                 "教案",
                 "播客",
+                "视频",
+                "动画",
+                "卡片",
+                "海报",
             )
         ):
             intent = ConversationIntent.CREATE
@@ -268,6 +302,7 @@ class DeterministicTextProvider:
         artifact_labels = (
             "公众号文章",
             "短视频脚本",
+            "视频脚本",
             "播客稿",
             "课堂活动",
             "教案",
@@ -278,6 +313,8 @@ class DeterministicTextProvider:
             "问答游戏",
         )
         artifact_type = next((item for item in artifact_labels if item in message), None)
+        if artifact_type is None and any(term in message for term in ("视频", "动画", "短片")):
+            artifact_type = "视频脚本"
         needs_glyph = bool(character) and any(
             term in message for term in ("字形", "演化", "甲骨", "金文", "篆", "隶", "楷", "草书")
         )
@@ -439,7 +476,7 @@ class DeterministicTextProvider:
                     prompt=f"与较晚阶段并排观察，寻找“{character}”字形态组织的变化。",
                 )
             )
-        references = [item.evidence_id for item in evolution.evidence[:8]]
+        references = [item.evidence_id for item in _generation_evidence(evolution)[:8]]
         channels = brief.channels
         special_title = {
             "礼": "礼不是距离，而是分寸",
@@ -517,7 +554,9 @@ class DeterministicTextProvider:
     ) -> CommunicationAsset:
         character = evolution.character
         hook_ids = [item.image_id for item in motif.visual_sequence]
-        references = motif.reference_ids or [item.evidence_id for item in evolution.evidence[:8]]
+        references = motif.reference_ids or [
+            item.evidence_id for item in _generation_evidence(evolution)[:8]
+        ]
         beats = motif.story_beats or narrative_route.story_beats
         if asset_type == CommunicationAssetType.INTERACTIVE_STORY:
             sections = [
@@ -634,7 +673,8 @@ class DeterministicTextProvider:
                     set(asset.visual_hook_ids) & {item.image_id for item in motif.visual_sequence}
                 )
             ),
-            "reference_context": not evolution.evidence or bool(asset.reference_ids),
+            "reference_context": not _generation_evidence(evolution)
+            or bool(asset.reference_ids),
             "audience_fit": bool(brief.audience),
         }
         if isinstance(asset.content, InteractiveStoryContent):
@@ -901,7 +941,7 @@ class DeterministicTextProvider:
         ]
         reference_lines = [
             f"- **{item.title}**（{item.author_or_org}）：{item.quote_or_summary}"
-            for item in evolution.evidence[:12]
+            for item in _generation_evidence(evolution)[:12]
         ]
         visual_lines = [
             (
@@ -957,7 +997,7 @@ class DeterministicTextProvider:
             outline=["认识任务", "观察字形", "参考资料", "互动讨论"],
             body_markdown=body,
             interaction_questions=questions,
-            source_ids=[evidence.evidence_id for evidence in evolution.evidence],
+            source_ids=[evidence.evidence_id for evidence in _generation_evidence(evolution)],
             estimated_characters=len(re.sub(r"\s|[#*\-]", "", body)),
         )
 
@@ -1070,7 +1110,9 @@ class AliyunBailianTextProvider:
             "选择一个 intent：answer=直接讨论或回答，explore=研究字形或资料，create=创作新作品，"
             "revise=修改已有作品，transform=把已有作品转换成另一种形式，clarify=缺少关键要求。"
             "用户没有要求生成作品时不要擅自选择 create。artifact_type 使用用户自己的内容形式名称，"
-            "不受固定枚举限制。只有回答确实需要新网络资料时 needs_web_search=true；涉及真实字形观察"
+            "不受固定枚举限制。系统不生成视频文件：当用户要求创作视频、动画或短片时，"
+            "artifact_type 必须设为视频脚本。只有回答确实需要新网络资料时 "
+            "needs_web_search=true；涉及真实字形观察"
             "或演化比较时 needs_glyph_context=true。target_artifact_id 只能使用已有作品 ID。"
             "返回 JSON：intent、action_summary、artifact_type、target_artifact_id、"
             "needs_web_search、search_query、needs_glyph_context。不要输出思维过程。"
@@ -1106,6 +1148,10 @@ class AliyunBailianTextProvider:
                 plan.target_artifact_id = str(first_id) if first_id else None
             if not plan.needs_web_search:
                 plan.search_query = None
+            if plan.intent in {ConversationIntent.CREATE, ConversationIntent.TRANSFORM} and any(
+                term in message for term in ("视频", "动画", "短片")
+            ):
+                plan.artifact_type = "视频脚本"
             self.last_fallback_used = False
             return plan
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -1134,6 +1180,9 @@ class AliyunBailianTextProvider:
             "不要仅凭图像解释构件含义、造字法、字源、年代或传承；只有参考资料明确提供时才能引用。"
             "所有面向用户的文字不得出现图片编号、代码点、数据集名称、"
             "元数据、原始路径或内部字段名，也不要输出模型思维过程。"
+            "系统不具备视频渲染、合成或视频文件导出能力。若用户要求生成视频、动画或短片，"
+            "必须交付可编辑的视频脚本，内容应按需包含分镜、旁白、字幕、时长和素材建议；"
+            "不得声称已经生成视频、动画或 MP4 文件。"
             "返回 JSON：intent、assistant_message、action_summary、workspace_view、artifact。"
             "workspace_view 只能是 conversation、evolution、sources、artifact。"
             "answer、explore、clarify 时 artifact=null；create、revise、transform 时 artifact 必须"
@@ -1142,7 +1191,12 @@ class AliyunBailianTextProvider:
             "交付的完整"
             "作品，不是提纲或生成说明；形式、长度、语气和结构服从用户要求。修改时保留未要求改变的"
             "部分，转换时生成适合新媒介的完整版本。编号只能放在 reference_ids、visual_hook_ids、"
-            "target_artifact_id 这些机器字段中。"
+            "target_artifact_id 这些机器字段中。若 available_artifacts 中提供 selection，用户说"
+            "“这里”“这一页”“这段”时必须只修改 selection 指向的页面或内容块，保留其他内容。"
+            "系统公开支持 Word、HTML、TXT、PDF、PPT 五种格式；作品正文需要有明确的图片使用位置"
+            "和图注。TXT 只能输出图片说明，不得声称能嵌入图片。available_artifacts 中 source_kind="
+            "glyph 且 locked=true 的真实历史字形不得替换、重绘或虚构；修改时只可调整其位置、大小、"
+            "顺序、图注以及周围文字。"
         )
         payload = {
             "plan": plan.model_dump(mode="json"),
@@ -1158,6 +1212,17 @@ class AliyunBailianTextProvider:
             parsed["action_summary"] = plan.action_summary
             output = ConversationTurnOutput.model_validate(parsed)
             if output.artifact is not None:
+                if plan.intent in {ConversationIntent.CREATE, ConversationIntent.TRANSFORM} and any(
+                    term in message for term in ("视频", "动画", "短片")
+                ):
+                    output.artifact.artifact_type = "视频脚本"
+                    output.artifact.format_label = "视频脚本"
+                    if "脚本" not in output.artifact.title:
+                        output.artifact.title = f"{output.artifact.title}（视频脚本）"
+                    output.assistant_message = (
+                        f"已生成“{output.artifact.title}”视频脚本。"
+                        "你可以继续修改分镜、旁白、字幕、时长或素材建议。"
+                    )
                 raw_references = task_context.get("reference_materials", [])
                 reference_items = raw_references if isinstance(raw_references, list) else []
                 allowed_references = {
@@ -1295,7 +1360,7 @@ class AliyunBailianTextProvider:
         allowed_images = {
             stage.image_id for stage in evolution.glyph_stages if stage.image_id is not None
         }
-        allowed_references = {item.evidence_id for item in evolution.evidence}
+        allowed_references = {item.evidence_id for item in _generation_evidence(evolution)}
         system = (
             "你是汉字文化叙事策划 Agent。基于传播 Brief、真实字形阶段、结构化视觉观察和参考"
             "资料，生成 2 到 3 条明显不同的 NarrativeRoute。每条包含 route_id、title、"
@@ -1490,7 +1555,7 @@ class AliyunBailianTextProvider:
         allowed_images = {
             stage.image_id for stage in evolution.glyph_stages if stage.image_id is not None
         }
-        allowed_references = {item.evidence_id for item in evolution.evidence}
+        allowed_references = {item.evidence_id for item in _generation_evidence(evolution)}
         system = (
             "你是汉字文化传播母题设计器。把用户已选择的 NarrativeRoute 固化成一个跨媒介"
             "CulturalMotif，互动长页、五张图文卡片和 60 秒短视频后续都必须复用它。"
@@ -1532,7 +1597,7 @@ class AliyunBailianTextProvider:
         allowed_images = {
             stage.image_id for stage in evolution.glyph_stages if stage.image_id is not None
         }
-        allowed_references = {item.evidence_id for item in evolution.evidence}
+        allowed_references = {item.evidence_id for item in _generation_evidence(evolution)}
         structure_requirement = {
             CommunicationAssetType.INTERACTIVE_STORY: (
                 "content 必须包含 title、lede、3–8 个 sections、closing、interaction_questions；"
@@ -1767,12 +1832,7 @@ class AliyunBailianTextProvider:
         evolution: EvolutionPackage, limit: int, content_limit: int
     ) -> list[dict[str, object]]:
         materials: list[dict[str, object]] = []
-        for item in evolution.evidence:
-            searchable = " ".join(
-                [item.evidence_id, item.source_id, item.title, item.url or ""]
-            ).lower()
-            if "jiezi" in searchable or item.metadata.get("kind") == "glyph_dataset":
-                continue
+        for item in _generation_evidence(evolution):
             materials.append(
                 {
                     "reference_id": item.evidence_id,

@@ -3,6 +3,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
+from character_vein_api.artifact_documents import build_rich_document
 from character_vein_api.models import (
     AssetRecord,
     ClaimRecord,
@@ -20,8 +21,10 @@ from character_vein_domain import (
     CommunicationBrief,
     ConstraintResult,
     ConversationIntent,
+    CreativeArtifactDraft,
     CulturalMotif,
     GeneratedContent,
+    RichArtifactDocument,
     TaskSpec,
     communication_brief_from_task_spec,
 )
@@ -61,6 +64,8 @@ class RegenerateCommunicationFragmentRequest(BaseModel):
 class ConversationMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
     active_artifact_id: str | None = Field(default=None, max_length=36)
+    active_page_id: str | None = Field(default=None, max_length=80)
+    active_block_id: str | None = Field(default=None, max_length=80)
 
 
 class ConversationMessageResponse(BaseModel):
@@ -95,6 +100,7 @@ class CreativeArtifactResponse(BaseModel):
     title: str
     summary: str
     content_markdown: str
+    rich_document: RichArtifactDocument
     version: int
     reference_ids: list[str]
     visual_hook_ids: list[str]
@@ -103,6 +109,21 @@ class CreativeArtifactResponse(BaseModel):
 
     @classmethod
     def from_record(cls, record: CreativeArtifactRecord) -> "CreativeArtifactResponse":
+        document = (
+            RichArtifactDocument.model_validate(record.document_json)
+            if record.document_json
+            else build_rich_document(
+                CreativeArtifactDraft(
+                    artifact_type=record.artifact_type,
+                    format_label=record.format_label,
+                    title=record.title,
+                    summary=record.summary,
+                    content_markdown=record.content_markdown,
+                    reference_ids=record.reference_ids or [],
+                    visual_hook_ids=record.visual_hook_ids or [],
+                )
+            )
+        )
         return cls(
             id=record.id,
             task_id=record.task_id,
@@ -113,6 +134,7 @@ class CreativeArtifactResponse(BaseModel):
             title=record.title,
             summary=record.summary,
             content_markdown=record.content_markdown,
+            rich_document=document,
             version=record.version,
             reference_ids=record.reference_ids or [],
             visual_hook_ids=record.visual_hook_ids or [],

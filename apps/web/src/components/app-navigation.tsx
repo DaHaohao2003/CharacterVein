@@ -2,102 +2,137 @@
 
 import Link from "next/link";
 
+export type PrimarySection = "home" | "research" | "communication";
 export type WorkspaceView = "evolution" | "sources" | "output" | "task";
 
 type AppNavigationProps = {
-  active: "home" | "workspace" | "content";
+  active: PrimarySection;
   character?: string;
-  currentView?: WorkspaceView;
-  onViewChange?: (view: WorkspaceView) => void;
+  onSectionChange?: (section: Exclude<PrimarySection, "home">) => void;
   status?: string;
   taskId?: string;
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  awaiting_confirmation: "对话创作中",
+  awaiting_confirmation: "对话进行中",
   confirmed: "准备执行",
   running: "智能体执行中",
   awaiting_route_selection: "等待选择路线",
-  completed: "创作已完成",
+  completed: "任务已完成",
   failed: "执行遇到问题",
 };
 
-const VIEW_ITEMS: Array<{
-  id: WorkspaceView;
+const PRIMARY_ITEMS: Array<{
+  id: PrimarySection;
   icon: string;
   label: string;
+  description: string;
 }> = [
-  { id: "evolution", icon: "字", label: "演化画布" },
-  { id: "sources", icon: "源", label: "参考资料" },
-  { id: "output", icon: "稿", label: "创作作品" },
-  { id: "task", icon: "序", label: "任务概览" },
+  { id: "home", icon: "首", label: "首页", description: "开始与管理任务" },
+  {
+    id: "research",
+    icon: "研",
+    label: "汉字研究",
+    description: "字形、资料与文化语境",
+  },
+  {
+    id: "communication",
+    icon: "传",
+    label: "文化传播",
+    description: "生成、修改与转换作品",
+  },
 ];
+
+function sectionHref(section: PrimarySection, taskId?: string): string {
+  if (section === "home") return "/";
+  if (!taskId) return section === "research" ? "/research" : "/communication";
+  return section === "research"
+    ? `/tasks/${taskId}/workspace?space=research&view=evolution`
+    : `/tasks/${taskId}/workspace?space=communication&view=output`;
+}
 
 export function AppNavigation({
   active,
   character,
-  currentView,
-  onViewChange,
+  onSectionChange,
   status,
   taskId,
 }: AppNavigationProps) {
   return (
-    <aside className="app-navigation" aria-label="字脉导航">
+    <aside className="app-navigation" aria-label="字脉主导航">
       <div className="app-brand">
         <span className="app-brand-mark" aria-hidden="true">
           脉
         </span>
         <span>
           <strong>字脉</strong>
-          <small>文化传播智能体</small>
+          <small>汉字文化传播智能体</small>
         </span>
       </div>
 
-      <nav className="app-nav-primary">
-        <Link className={active === "home" ? "is-active" : ""} href="/">
-          <span className="app-nav-icon">＋</span>
-          新建创作
-        </Link>
+      <Link aria-label="开始新任务" className="app-new-task" href="/">
+        <span aria-hidden="true">＋</span>
+        <span>
+          <strong>开始新任务</strong>
+          <small>从一个问题或汉字开始</small>
+        </span>
+      </Link>
+
+      <nav className="app-nav-primary" aria-label="主要功能">
+        {PRIMARY_ITEMS.map((item) => {
+          const content = (
+            <>
+              <span className="app-nav-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              <span className="app-nav-copy">
+                <strong>{item.label}</strong>
+                <small>{item.description}</small>
+              </span>
+            </>
+          );
+          const className = active === item.id ? "is-active" : "";
+          const taskSection =
+            item.id === "research" || item.id === "communication"
+              ? item.id
+              : null;
+          if (taskSection && taskId && onSectionChange) {
+            return (
+              <button
+                aria-label={item.label}
+                className={className}
+                key={item.id}
+                onClick={() => onSectionChange(taskSection)}
+                type="button"
+              >
+                {content}
+              </button>
+            );
+          }
+          return (
+            <Link
+              aria-label={item.label}
+              className={className}
+              href={sectionHref(item.id, taskId)}
+              key={item.id}
+            >
+              {content}
+            </Link>
+          );
+        })}
       </nav>
 
       {taskId && (
-        <section className="app-nav-task">
-          <div className="app-nav-section-title">
-            <span>当前任务</span>
-            {character && <strong>{character}</strong>}
+        <section className="app-current-task" aria-label="当前任务">
+          <span>当前任务</span>
+          <div>
+            <strong>{character || "待确认"}</strong>
+            <p>
+              {character
+                ? `正在围绕“${character}”持续研究与创作`
+                : "等待确认研究汉字"}
+            </p>
           </div>
-          <nav>
-            {VIEW_ITEMS.map((item) =>
-              onViewChange ? (
-                <button
-                  className={currentView === item.id ? "is-active" : ""}
-                  key={item.id}
-                  onClick={() => onViewChange(item.id)}
-                  type="button"
-                >
-                  <span className="app-nav-icon">{item.icon}</span>
-                  {item.label}
-                </button>
-              ) : (
-                <Link
-                  className={
-                    active === "content" && item.id === "output"
-                      ? "is-active"
-                      : ""
-                  }
-                  href={
-                    item.id === "output"
-                      ? `/tasks/${taskId}/content`
-                      : `/tasks/${taskId}/workspace?view=${item.id}`
-                  }
-                  key={item.id}
-                >
-                  <span className="app-nav-icon">{item.icon}</span>
-                  {item.label}
-                </Link>
-              ),
-            )}
-          </nav>
         </section>
       )}
 
@@ -109,7 +144,7 @@ export function AppNavigation({
           />
           <div>
             <strong>{STATUS_LABELS[status] ?? status}</strong>
-            <small>任务 {taskId.slice(0, 8)}</small>
+            <small>研究与传播上下文已连接</small>
           </div>
         </section>
       )}

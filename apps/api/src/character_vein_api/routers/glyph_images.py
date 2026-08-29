@@ -16,7 +16,7 @@ router = APIRouter(prefix="/glyph-images", tags=["glyph image RAG"])
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 SAFE_CODEPOINT = re.compile(r"U\+[0-9A-F]{4,6}")
 SAFE_SCRIPT = re.compile(r"[JBGSLKC]")
-SAFE_FILENAME = re.compile(r"[A-Za-z0-9._-]+\.(?:jpg|jpeg|png)", re.IGNORECASE)
+SAFE_FILENAME = re.compile(r"[A-Za-z0-9_-]+(?:\.(?:jpg|jpeg|png))?", re.IGNORECASE)
 
 
 @router.get("/search", response_model=list[GlyphImageSearchResult])
@@ -47,7 +47,9 @@ async def get_glyph_image(
         and SAFE_FILENAME.fullmatch(filename)
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="字形图片不存在")
-    record = await GlyphImageRepository(session).get(f"{codepoint}/{script_code}/{filename}")
+    record = await GlyphImageRepository(session).get_compatible(
+        f"{codepoint}/{script_code}/{filename}"
+    )
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="字形图片不存在")
 

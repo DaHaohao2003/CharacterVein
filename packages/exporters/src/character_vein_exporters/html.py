@@ -1,6 +1,6 @@
 from html import escape
 
-from character_vein_domain import EvolutionPackage, GeneratedContent
+from character_vein_domain import EvolutionPackage, GeneratedContent, SourceOrigin
 
 
 def export_html(content: GeneratedContent, evolution: EvolutionPackage) -> str:
@@ -16,6 +16,17 @@ def export_html(content: GeneratedContent, evolution: EvolutionPackage) -> str:
         )
         + "</li>"
         for item in evolution.evidence
+        if (
+            item.origin in {SourceOrigin.WEB, SourceOrigin.USER_UPLOAD}
+            or (
+                item.origin == SourceOrigin.FIXTURE
+                and item.metadata.get("kind") == "evolution_framework"
+            )
+        )
+        and "jiezi"
+        not in " ".join([item.evidence_id, item.source_id, item.title, item.url or ""]).lower()
+        and item.metadata.get("kind")
+        not in {"glyph_dataset", "glyph_stage", "glyph_context"}
     )
     return f"""<!doctype html>
 <html lang="zh-CN">

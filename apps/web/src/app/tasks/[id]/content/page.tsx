@@ -16,6 +16,7 @@ import {
   regenerateContent,
   saveContent,
 } from "@/lib/api";
+import { toPublicCopy } from "@/lib/public-copy";
 import type {
   ContentVersion,
   GeneratedContent,
@@ -300,7 +301,7 @@ export default function ContentPage() {
   return (
     <main className="agent-app-shell content-agent-shell">
       <AppNavigation
-        active="content"
+        active="communication"
         character={task.spec.target_characters.join("")}
         status={task.status}
         taskId={id}
@@ -322,7 +323,7 @@ export default function ContentPage() {
             </div>
             <Link
               className="button-link button-link--secondary"
-              href={`/tasks/${id}/workspace`}
+              href={`/tasks/${id}/workspace?space=communication&view=output`}
             >
               返回工作台
             </Link>
@@ -827,7 +828,11 @@ export default function ContentPage() {
                 <span className="chat-message-avatar">脉</span>
               )}
               <div>
-                <p>{message.content}</p>
+                <p>
+                  {message.role === "assistant"
+                    ? toPublicCopy(message.content)
+                    : message.content}
+                </p>
               </div>
             </article>
           ))}
